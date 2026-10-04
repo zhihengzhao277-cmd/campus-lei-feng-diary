@@ -1,0 +1,5 @@
+admin001|系统管理员|admin123
+admin002|牢大|admin123
+admin003|唐三|admin123
+admin004|肖四|admin123
+admin005|老师|admin123

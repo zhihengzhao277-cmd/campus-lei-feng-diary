@@ -1,6 +1,7 @@
 #include "login_window.h"
 
 #include <QFrame>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
@@ -25,64 +26,132 @@ LoginWindow::LoginWindow(QWidget *parent)
     data.loadAll();
 
     setWindowTitle("校园雷锋日记 - 登录");
-    resize(500, 520);
+    setMinimumSize(800, 520);
+    resize(880, 560);
+    setObjectName("loginWindow");
 
     setStyleSheet(
-        StyleHelper::pageBackground());
+        StyleHelper::loginScreen());
+
+    QFrame *brandPanel =
+        new QFrame;
+
+    brandPanel->setObjectName(
+        "loginBrandPanel");
+
+    brandPanel->setMinimumWidth(300);
+    brandPanel->setMaximumWidth(340);
+
+    QVBoxLayout *brandLayout =
+        new QVBoxLayout(brandPanel);
+
+    brandLayout->setContentsMargins(
+        34,
+        38,
+        34,
+        30);
+
+    brandLayout->setSpacing(16);
+
+    QLabel *brandEyebrow =
+        new QLabel("CAMPUS VOLUNTEER SERVICE");
+
+    brandEyebrow->setObjectName(
+        "brandEyebrow");
 
     systemTitleLabel =
         new QLabel("校园雷锋日记");
 
-    QFont titleFont =
-        systemTitleLabel->font();
+    systemTitleLabel->setObjectName(
+        "brandTitle");
 
-    titleFont.setPointSize(30);
-    titleFont.setBold(true);
-
-    systemTitleLabel->setFont(titleFont);
-    systemTitleLabel->setAlignment(Qt::AlignCenter);
-    systemTitleLabel->setStyleSheet(
-        "color:#B91C3A;"
-        "background:transparent;");
+    systemTitleLabel->setWordWrap(true);
 
     systemSubtitleLabel =
-        new QLabel("记录善行  传播温暖");
+        new QLabel("记录志愿服务，传递校园善意");
 
-    systemSubtitleLabel->setAlignment(
-        Qt::AlignCenter);
+    systemSubtitleLabel->setObjectName(
+        "brandSubtitle");
 
-    systemSubtitleLabel->setStyleSheet(
-        "color:#888888;"
-        "font-size:16px;"
-        "background:transparent;");
+    systemSubtitleLabel->setWordWrap(true);
+
+    QLabel *brandFooter =
+        new QLabel("学生 · 管理员统一登录");
+
+    brandFooter->setObjectName(
+        "brandFooter");
+
+    brandLayout->addWidget(brandEyebrow);
+    brandLayout->addSpacing(8);
+    brandLayout->addWidget(systemTitleLabel);
+    brandLayout->addWidget(systemSubtitleLabel);
+    brandLayout->addStretch();
+    brandLayout->addWidget(brandFooter);
 
     loginCard = new QFrame;
-    loginCard->setMaximumWidth(380);
-    loginCard->setStyleSheet(
-        StyleHelper::card());
+    loginCard->setObjectName("loginCard");
+    loginCard->setMinimumWidth(380);
+    loginCard->setMaximumWidth(440);
 
     QVBoxLayout *cardLayout =
         new QVBoxLayout(loginCard);
 
     cardLayout->setContentsMargins(
-        35,
-        35,
-        35,
-        35);
+        34,
+        32,
+        34,
+        28);
 
-    cardLayout->setSpacing(18);
+    cardLayout->setSpacing(12);
+
+    QLabel *formTitle =
+        new QLabel("欢迎登录");
+
+    formTitle->setObjectName(
+        "loginHeading");
+
+    QLabel *formSubtitle =
+        new QLabel("请输入校园账号与密码");
+
+    formSubtitle->setObjectName(
+        "loginSubheading");
+
+    QLabel *accountLabel =
+        new QLabel("账号 ID");
+
+    accountLabel->setObjectName(
+        "accountLabel");
 
     accountEdit =
         new QLineEdit;
 
+    accountEdit->setObjectName(
+        "accountEdit");
+
     passwordEdit =
         new QLineEdit;
+
+    passwordEdit->setObjectName(
+        "passwordEdit");
+
+    QLabel *passwordLabel =
+        new QLabel("密码");
+
+    passwordLabel->setObjectName(
+        "passwordLabel");
+
+    accountLabel->setBuddy(accountEdit);
+    passwordLabel->setBuddy(passwordEdit);
 
     loginButton =
         new QPushButton("登录");
 
-    messageLabel =
-        new QLabel;
+    loginButton->setObjectName(
+        "loginButton");
+
+    messageLabel = new QLabel;
+    messageLabel->setObjectName(
+        "loginMessage");
 
     accountEdit->setPlaceholderText(
         "请输入账号");
@@ -93,65 +162,54 @@ LoginWindow::LoginWindow(QWidget *parent)
     passwordEdit->setEchoMode(
         QLineEdit::Password);
 
-    accountEdit->setStyleSheet(
-        StyleHelper::input());
-
-    passwordEdit->setStyleSheet(
-        StyleHelper::input());
-
-    accountEdit->setMinimumHeight(42);
-    passwordEdit->setMinimumHeight(42);
-
-    loginButton->setStyleSheet(
-        StyleHelper::primaryButton());
-
-    loginButton->setMinimumHeight(45);
+    accountEdit->setMinimumHeight(46);
+    passwordEdit->setMinimumHeight(46);
+    loginButton->setMinimumHeight(48);
 
     QLabel *tipLabel =
         new QLabel(
             "学生与管理员均可使用账号登录");
 
-    tipLabel->setAlignment(
-        Qt::AlignCenter);
+    tipLabel->setObjectName("loginHint");
 
-    tipLabel->setStyleSheet(
-        "color:#999999;"
-        "font-size:13px;");
-
-    cardLayout->addWidget(accountEdit);
-    cardLayout->addWidget(passwordEdit);
-    cardLayout->addWidget(loginButton);
-    cardLayout->addWidget(tipLabel);
-
-    messageLabel =
-        new QLabel;
-
+    messageLabel->setMinimumHeight(22);
     messageLabel->setAlignment(
-        Qt::AlignCenter);
+        Qt::AlignLeft | Qt::AlignVCenter);
 
-    messageLabel->setStyleSheet(
-        "color:#B91C3A;"
-        "background:transparent;");
+    cardLayout->addWidget(formTitle);
+    cardLayout->addWidget(formSubtitle);
+    cardLayout->addSpacing(10);
+    cardLayout->addWidget(accountLabel);
+    cardLayout->addWidget(accountEdit);
+    cardLayout->addWidget(passwordLabel);
+    cardLayout->addWidget(passwordEdit);
+    cardLayout->addWidget(messageLabel);
+    cardLayout->addSpacing(4);
+    cardLayout->addWidget(loginButton);
+    cardLayout->addWidget(
+        tipLabel,
+        0,
+        Qt::AlignHCenter);
 
-    QVBoxLayout *layout =
-        new QVBoxLayout(this);
+    QHBoxLayout *layout =
+        new QHBoxLayout(this);
 
     layout->setContentsMargins(
-        24,
-        32,
-        24,
-        32);
+        30,
+        28,
+        30,
+        28);
 
-    layout->setSpacing(10);
+    layout->setSpacing(20);
     layout->addStretch();
-    layout->addWidget(systemTitleLabel);
-    layout->addWidget(systemSubtitleLabel);
-    layout->addSpacing(18);
+    layout->addWidget(
+        brandPanel,
+        0,
+        Qt::AlignVCenter);
     layout->addWidget(
         loginCard,
         0,
-        Qt::AlignHCenter);
-    layout->addWidget(messageLabel);
+        Qt::AlignVCenter);
     layout->addStretch();
 
     connect(

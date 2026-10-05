@@ -6,6 +6,10 @@
 class StyleHelper
 {
 public:
+    static QString loginScreen();
+
+    static QString studentDashboard();
+
     static QString pageBackground();
 
     static QString card();

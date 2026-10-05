@@ -1,0 +1,13 @@
+<RCC>
+    <qresource prefix="/badges">
+        <file alias="C01/bronze.svg">badges/badge_c01_bronze.svg</file>
+        <file alias="C01/silver.svg">badges/badge_c01_silver.svg</file>
+        <file alias="C01/gold.svg">badges/badge_c01_gold.svg</file>
+        <file alias="C02/bronze.svg">badges/badge_c02_bronze.svg</file>
+        <file alias="C02/silver.svg">badges/badge_c02_silver.svg</file>
+        <file alias="C02/gold.svg">badges/badge_c02_gold.svg</file>
+        <file alias="C03/bronze.svg">badges/badge_c03_bronze.svg</file>
+        <file alias="C03/silver.svg">badges/badge_c03_silver.svg</file>
+        <file alias="C03/gold.svg">badges/badge_c03_gold.svg</file>
+    </qresource>
+</RCC>

@@ -50,8 +50,11 @@ add_executable(
     qt/style_helper.cpp
     qt/style_helper.h
 
+    qt/resources/badges.qrc
+
     ${CORE_SOURCES}
 )
+set_property(TARGET leifeng_qt PROPERTY AUTORCC ON)
 target_include_directories(
     leifeng_qt
     PRIVATE

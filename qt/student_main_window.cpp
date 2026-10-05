@@ -1,5 +1,6 @@
 #include "student_main_window.h"
 #include "style_helper.h"
+#include "badge_icon_mapper.h"
 
 #include <QDoubleSpinBox>
 #include <QFormLayout>
@@ -23,6 +24,9 @@
 #include <QMessageBox>
 #include <QScrollArea>
 #include <QFrame>
+#include <QIcon>
+#include <QSize>
+#include <QStringList>
 
 #include "data_manager.h"
 #include "diary_post.h"
@@ -51,6 +55,11 @@ StudentMainWindow::StudentMainWindow(
       navigationList(nullptr),
       contentStack(nullptr),
       homePage(nullptr),
+      dashboardGreetingLabel(nullptr),
+      dashboardScoreLabel(nullptr),
+      dashboardRankLabel(nullptr),
+      dashboardApprovedRecordsLabel(nullptr),
+      dashboardEmptyBadgesLabel(nullptr),
       recordsPage(nullptr),
       recordsTable(nullptr), categoryFilter(nullptr),
       startDateEdit(nullptr),
@@ -220,28 +229,252 @@ void StudentMainWindow::buildHomePage()
 {
     homePage =
         new QWidget;
+    homePage->setObjectName("studentDashboard");
+    homePage->setStyleSheet(
+        StyleHelper::studentDashboard());
 
-    QVBoxLayout *layout =
-        new QVBoxLayout(homePage);
+    QVBoxLayout *pageLayout = new QVBoxLayout(homePage);
+    pageLayout->setContentsMargins(0, 0, 0, 0);
 
-    QLabel *titleLabel =
-        new QLabel("学生主页");
+    QScrollArea *scrollArea = new QScrollArea(homePage);
+    scrollArea->setObjectName("dashboardScrollArea");
+    scrollArea->setWidgetResizable(true);
+    scrollArea->setFrameShape(QFrame::NoFrame);
+    scrollArea->setHorizontalScrollBarPolicy(
+        Qt::ScrollBarAlwaysOff);
 
-    titleLabel->setStyleSheet(
-        StyleHelper::title());
+    QWidget *content = new QWidget;
+    content->setObjectName("dashboardContent");
+    QVBoxLayout *layout = new QVBoxLayout(content);
+    layout->setContentsMargins(22, 20, 22, 22);
+    layout->setSpacing(16);
 
-    QLabel *descriptionLabel =
-        new QLabel(
-            "欢迎使用校园雷锋日记系统。\n\n"
-            "请通过左侧菜单选择功能。");
+    QVBoxLayout *headingLayout = new QVBoxLayout;
+    headingLayout->setSpacing(4);
+    dashboardGreetingLabel = new QLabel("你好");
+    dashboardGreetingLabel->setObjectName("dashboardGreeting");
+    QLabel *descriptionLabel = new QLabel(
+        "查看你的志愿服务进展，继续校园公益行动。");
+    descriptionLabel->setObjectName("dashboardDescription");
+    headingLayout->addWidget(dashboardGreetingLabel);
+    headingLayout->addWidget(descriptionLabel);
+    layout->addLayout(headingLayout);
 
-    descriptionLabel->setStyleSheet(
-        StyleHelper::subtitle());
+    QHBoxLayout *metricsLayout = new QHBoxLayout;
+    metricsLayout->setSpacing(12);
+    const auto addMetric = [metricsLayout](
+                               const QString &title,
+                               const QString &objectName,
+                               QLabel **valueLabel)
+    {
+        QFrame *card = new QFrame;
+        card->setObjectName("dashboardStatCard");
+        QVBoxLayout *cardLayout = new QVBoxLayout(card);
+        cardLayout->setContentsMargins(16, 13, 16, 14);
+        cardLayout->setSpacing(5);
+        QLabel *caption = new QLabel(title);
+        caption->setObjectName("dashboardStatCaption");
+        *valueLabel = new QLabel("—");
+        (*valueLabel)->setObjectName(objectName);
+        cardLayout->addWidget(caption);
+        cardLayout->addWidget(*valueLabel);
+        metricsLayout->addWidget(card, 1);
+    };
 
-    layout->addWidget(titleLabel);
-    layout->addWidget(descriptionLabel);
+    addMetric("累计积分", "dashboardScoreValue",
+              &dashboardScoreLabel);
+    addMetric("当前排名", "dashboardRankValue",
+              &dashboardRankLabel);
+    addMetric("审核通过记录", "dashboardApprovedRecordsValue",
+              &dashboardApprovedRecordsLabel);
+    layout->addLayout(metricsLayout);
 
-    layout->addStretch();
+    QFrame *actionsSection = new QFrame;
+    actionsSection->setObjectName("dashboardSection");
+    QVBoxLayout *actionsLayout = new QVBoxLayout(actionsSection);
+    actionsLayout->setContentsMargins(16, 13, 16, 14);
+    actionsLayout->setSpacing(10);
+    QLabel *actionsTitle = new QLabel("常用入口");
+    actionsTitle->setObjectName("dashboardSectionTitle");
+    QHBoxLayout *actionsButtons = new QHBoxLayout;
+    actionsButtons->setSpacing(8);
+    QPushButton *recordsButton = new QPushButton("我的志愿记录");
+    recordsButton->setObjectName("dashboardActionButton");
+    QPushButton *submitButton = new QPushButton("提交志愿记录");
+    submitButton->setObjectName("dashboardPrimaryActionButton");
+    QPushButton *rankingButton = new QPushButton("查看排行榜");
+    rankingButton->setObjectName("dashboardActionButton");
+    for (QPushButton *button :
+         {recordsButton, submitButton, rankingButton})
+    {
+        button->setCursor(Qt::PointingHandCursor);
+        button->setMinimumHeight(38);
+        actionsButtons->addWidget(button);
+    }
+    actionsLayout->addWidget(actionsTitle);
+    actionsLayout->addLayout(actionsButtons);
+    layout->addWidget(actionsSection);
+
+    connect(recordsButton, &QPushButton::clicked,
+            this, [this]() { navigationList->setCurrentRow(1); });
+    connect(submitButton, &QPushButton::clicked,
+            this, [this]() { navigationList->setCurrentRow(2); });
+    connect(rankingButton, &QPushButton::clicked,
+            this, [this]() { navigationList->setCurrentRow(4); });
+
+    QFrame *badgesSection = new QFrame;
+    badgesSection->setObjectName("dashboardSection");
+    QVBoxLayout *badgesLayout = new QVBoxLayout(badgesSection);
+    badgesLayout->setContentsMargins(16, 13, 16, 14);
+    badgesLayout->setSpacing(10);
+    QLabel *badgesTitle = new QLabel("我的荣誉");
+    badgesTitle->setObjectName("dashboardSectionTitle");
+    badgesLayout->addWidget(badgesTitle);
+
+    QHBoxLayout *badgeCardsLayout = new QHBoxLayout;
+    badgeCardsLayout->setSpacing(10);
+    const QStringList badgeCategories = {"C01", "C02", "C03"};
+    for (const QString &categoryId : badgeCategories)
+    {
+        QFrame *badgeCard = new QFrame;
+        badgeCard->setObjectName(
+            "dashboardBadgeCard_" + categoryId);
+        badgeCard->setProperty("kind", "dashboardBadgeCard");
+        QVBoxLayout *badgeCardLayout = new QVBoxLayout(badgeCard);
+        badgeCardLayout->setContentsMargins(10, 10, 10, 10);
+        badgeCardLayout->setSpacing(5);
+        QLabel *iconLabel = new QLabel;
+        iconLabel->setObjectName(
+            "dashboardBadgeIcon_" + categoryId);
+        iconLabel->setAlignment(Qt::AlignCenter);
+        iconLabel->setFixedSize(54, 54);
+        QLabel *textLabel = new QLabel;
+        textLabel->setObjectName(
+            "dashboardBadgeText_" + categoryId);
+        textLabel->setAlignment(Qt::AlignCenter);
+        textLabel->setWordWrap(true);
+        badgeCardLayout->addWidget(iconLabel, 0, Qt::AlignHCenter);
+        badgeCardLayout->addWidget(textLabel);
+        badgeCardsLayout->addWidget(badgeCard, 1);
+        badgeCard->hide();
+    }
+    badgesLayout->addLayout(badgeCardsLayout);
+
+    dashboardEmptyBadgesLabel = new QLabel(
+        "完成并通过志愿服务记录后，这里会展示你获得的徽章。");
+    dashboardEmptyBadgesLabel->setObjectName("dashboardEmptyBadges");
+    dashboardEmptyBadgesLabel->setAlignment(Qt::AlignCenter);
+    dashboardEmptyBadgesLabel->setWordWrap(true);
+    badgesLayout->addWidget(dashboardEmptyBadgesLabel);
+    layout->addWidget(badgesSection);
+    layout->addStretch(1);
+
+    scrollArea->setWidget(content);
+    pageLayout->addWidget(scrollArea);
+}
+
+void StudentMainWindow::refreshDashboard()
+{
+    if (dataManager == nullptr || homePage == nullptr)
+    {
+        return;
+    }
+
+    Student *student = dataManager->findStudent(accountId);
+    if (dashboardGreetingLabel != nullptr)
+    {
+        const QString name = student == nullptr
+                                 ? QStringLiteral("同学")
+                                 : QString::fromStdString(student->getName());
+        dashboardGreetingLabel->setText("你好，" + name);
+    }
+
+    if (dashboardScoreLabel != nullptr)
+    {
+        dashboardScoreLabel->setText(
+            QString::number(
+                dataManager->calculateStudentScore(accountId), 'f', 2));
+    }
+
+    int approvedRecordCount = 0;
+    for (const VolunteerRecord &record : dataManager->getRecords())
+    {
+        if (record.getStudentId() == accountId &&
+            record.getStatus() == RecordStatus::Approved)
+        {
+            ++approvedRecordCount;
+        }
+    }
+    if (dashboardApprovedRecordsLabel != nullptr)
+    {
+        dashboardApprovedRecordsLabel->setText(
+            QString::number(approvedRecordCount));
+    }
+
+    QString rankText = "—";
+    const std::vector<RankingItem> ranking =
+        dataManager->generateRanking();
+    for (size_t i = 0; i < ranking.size(); ++i)
+    {
+        if (ranking[i].studentId == accountId)
+        {
+            rankText = QString("第 %1 名")
+                           .arg(static_cast<qulonglong>(i + 1));
+            break;
+        }
+    }
+    if (dashboardRankLabel != nullptr)
+    {
+        dashboardRankLabel->setText(rankText);
+    }
+
+    const QStringList badgeCategories = {"C01", "C02", "C03"};
+    bool hasEarnedBadge = false;
+    for (const QString &categoryId : badgeCategories)
+    {
+        const std::string category = categoryId.toStdString();
+        const double duration =
+            dataManager->calculateStudentDurationByCategory(
+                accountId, category);
+        int earnedLevel = 0;
+        const QString label =
+            badgeText(category, duration, &earnedLevel);
+        QFrame *badgeCard = homePage->findChild<QFrame *>(
+            "dashboardBadgeCard_" + categoryId);
+        QLabel *iconLabel = homePage->findChild<QLabel *>(
+            "dashboardBadgeIcon_" + categoryId);
+        QLabel *textLabel = homePage->findChild<QLabel *>(
+            "dashboardBadgeText_" + categoryId);
+
+        if (badgeCard == nullptr || iconLabel == nullptr ||
+            textLabel == nullptr)
+        {
+            continue;
+        }
+
+        if (earnedLevel == 0)
+        {
+            badgeCard->hide();
+            iconLabel->clear();
+            textLabel->clear();
+            continue;
+        }
+
+        const auto level =
+            static_cast<BadgeIconMapper::Level>(earnedLevel);
+        const QString iconPath =
+            BadgeIconMapper::resourcePath(category, level);
+        const QIcon icon(iconPath);
+        iconLabel->setPixmap(icon.pixmap(QSize(48, 48)));
+        textLabel->setText(label);
+        badgeCard->show();
+        hasEarnedBadge = true;
+    }
+
+    if (dashboardEmptyBadgesLabel != nullptr)
+    {
+        dashboardEmptyBadgesLabel->setVisible(!hasEarnedBadge);
+    }
 }
 
 void StudentMainWindow::buildRecordsPage()
@@ -451,6 +684,7 @@ void StudentMainWindow::handleNavigationChanged(
 {
     if (row == 0)
     {
+        refreshDashboard();
         contentStack->setCurrentWidget(homePage);
 
         return;
@@ -3009,8 +3243,14 @@ void StudentMainWindow::changePassword()
 
 QString StudentMainWindow::badgeText(
     const std::string &categoryId,
-    double duration) const
+    double duration,
+    int *earnedLevel) const
 {
+    if (earnedLevel != nullptr)
+    {
+        *earnedLevel = 0;
+    }
+
     QString badgeName;
 
     if (categoryId == "C01")
@@ -3032,16 +3272,19 @@ QString StudentMainWindow::badgeText(
 
     if (duration >= 60.0)
     {
+        if (earnedLevel != nullptr) *earnedLevel = 3;
         return "金级 · " + badgeName;
     }
 
     if (duration >= 30.0)
     {
+        if (earnedLevel != nullptr) *earnedLevel = 2;
         return "银级 · " + badgeName;
     }
 
     if (duration >= 10.0)
     {
+        if (earnedLevel != nullptr) *earnedLevel = 1;
         return "铜级 · " + badgeName;
     }
 

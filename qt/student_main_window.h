@@ -35,6 +35,7 @@ signals:
 private slots:
     void handleNavigationChanged(int row);
     void refreshMyRecords();
+    void refreshDashboard();
     void applyRecordFilter();
     void clearRecordFilter();
     void modifySelectedRecord();
@@ -58,6 +59,11 @@ private:
     QListWidget *navigationList;
     QStackedWidget *contentStack;
     QWidget *homePage;
+    QLabel *dashboardGreetingLabel;
+    QLabel *dashboardScoreLabel;
+    QLabel *dashboardRankLabel;
+    QLabel *dashboardApprovedRecordsLabel;
+    QLabel *dashboardEmptyBadgesLabel;
     QWidget *recordsPage;
     QTableWidget *recordsTable;
     void buildInterface();
@@ -97,7 +103,8 @@ private:
     void buildBadgePage();
     QString badgeText(
         const std::string &categoryId,
-        double duration) const;
+        double duration,
+        int *earnedLevel = nullptr) const;
     QWidget *diaryPage;
     QWidget *diaryWallPage;
 

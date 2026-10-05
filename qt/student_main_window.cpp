@@ -38,6 +38,7 @@
 #include <QProgressBar>
 #include <QSize>
 #include <QStringList>
+#include <cmath>
 
 #include "data_manager.h"
 #include "diary_post.h"
@@ -1401,23 +1402,45 @@ void StudentMainWindow::handleNavigationChanged(
 void StudentMainWindow::buildSubmitPage()
 {
     submitPage = new QWidget;
+    submitPage->setObjectName("studentSubmitPage");
+    submitPage->setStyleSheet(
+        StyleHelper::studentRemainingPages());
 
     QVBoxLayout *mainLayout =
         new QVBoxLayout(submitPage);
+    mainLayout->setContentsMargins(28, 24, 28, 24);
+    mainLayout->setSpacing(16);
 
     QLabel *titleLabel =
-        new QLabel("提交志愿记录");
-
-    titleLabel->setStyleSheet(
-        StyleHelper::title());
-
+        new QLabel("提交志愿");
+    titleLabel->setObjectName("studentSubmitPageTitle");
     mainLayout->addWidget(titleLabel);
 
-    QFormLayout *formLayout =
-        new QFormLayout;
+    QLabel *subtitleLabel = new QLabel(
+        "填写本次志愿服务信息并提交审核");
+    subtitleLabel->setObjectName(
+        "studentRemainingPageSubtitle");
+    mainLayout->addWidget(subtitleLabel);
+
+    QFrame *formCard = new QFrame;
+    formCard->setObjectName("studentSubmitFormCard");
+    QVBoxLayout *formCardLayout =
+        new QVBoxLayout(formCard);
+    formCardLayout->setContentsMargins(24, 22, 24, 24);
+    formCardLayout->setSpacing(18);
+
+    QFormLayout *formLayout = new QFormLayout;
+    formLayout->setLabelAlignment(
+        Qt::AlignLeft | Qt::AlignVCenter);
+    formLayout->setHorizontalSpacing(20);
+    formLayout->setVerticalSpacing(16);
+    formLayout->setFieldGrowthPolicy(
+        QFormLayout::AllNonFixedFieldsGrow);
 
     submitCategoryCombo =
         new QComboBox;
+    submitCategoryCombo->setObjectName(
+        "studentSubmitCategory");
 
     submitCategoryCombo->addItem(
         "劳动服务",
@@ -1431,13 +1454,13 @@ void StudentMainWindow::buildSubmitPage()
         "互助服务",
         "C03");
 
-    submitCategoryCombo->setStyleSheet(
-        StyleHelper::input());
-
     submitDateEdit =
         new QDateEdit;
-
+    submitDateEdit->setObjectName(
+        "studentSubmitDate");
     submitDateEdit->setCalendarPopup(true);
+    submitDateEdit->calendarWidget()->setStyleSheet(
+        StyleHelper::studentRecordsCalendarPopup());
 
     submitDateEdit->setDisplayFormat(
         "yyyy/MM/dd");
@@ -1447,77 +1470,86 @@ void StudentMainWindow::buildSubmitPage()
 
     submitDurationSpin =
         new QDoubleSpinBox;
+    submitDurationSpin->setObjectName(
+        "studentSubmitDuration");
 
     submitDurationSpin->setRange(
-        0.1,
+        0.0,
         10000.0);
 
     submitDurationSpin->setDecimals(1);
     submitDurationSpin->setSingleStep(0.5);
+    submitDurationSpin->setValue(0.0);
     submitDurationSpin->setSuffix(" 小时");
 
     submitPlaceEdit =
         new QLineEdit;
+    submitPlaceEdit->setObjectName(
+        "studentSubmitPlace");
 
     submitPlaceEdit->setPlaceholderText(
         "请输入服务地点");
 
-    submitPlaceEdit->setStyleSheet(
-        StyleHelper::input());
-
     submitWitnessEdit =
         new QLineEdit;
+    submitWitnessEdit->setObjectName(
+        "studentSubmitWitness");
 
     submitWitnessEdit->setPlaceholderText(
         "请输入证明人");
 
-    submitWitnessEdit->setStyleSheet(
-        StyleHelper::input());
-
     submitDescriptionEdit =
         new QTextEdit;
+    submitDescriptionEdit->setObjectName(
+        "studentSubmitDescription");
 
     submitDescriptionEdit->setPlaceholderText(
         "请输入志愿服务内容");
 
     submitDescriptionEdit->setFixedHeight(120);
 
-    submitDescriptionEdit->setStyleSheet(
-        StyleHelper::input());
+    QLabel *categoryLabel = new QLabel("志愿类别");
+    categoryLabel->setObjectName(
+        "studentSubmitFieldLabel");
+    QLabel *dateLabel = new QLabel("服务日期");
+    dateLabel->setObjectName(
+        "studentSubmitFieldLabel");
+    QLabel *durationLabel = new QLabel("服务时长");
+    durationLabel->setObjectName(
+        "studentSubmitFieldLabel");
+    QLabel *placeLabel = new QLabel("服务地点");
+    placeLabel->setObjectName(
+        "studentSubmitFieldLabel");
+    QLabel *witnessLabel = new QLabel("证明人");
+    witnessLabel->setObjectName(
+        "studentSubmitFieldLabel");
+    QLabel *descriptionLabel = new QLabel("服务描述");
+    descriptionLabel->setObjectName(
+        "studentSubmitFieldLabel");
 
+    formLayout->addRow(categoryLabel, submitCategoryCombo);
+    formLayout->addRow(dateLabel, submitDateEdit);
+    formLayout->addRow(durationLabel, submitDurationSpin);
+    formLayout->addRow(placeLabel, submitPlaceEdit);
+    formLayout->addRow(witnessLabel, submitWitnessEdit);
     formLayout->addRow(
-        "志愿类别：",
-        submitCategoryCombo);
-
-    formLayout->addRow(
-        "服务日期：",
-        submitDateEdit);
-
-    formLayout->addRow(
-        "服务时长：",
-        submitDurationSpin);
-
-    formLayout->addRow(
-        "服务地点：",
-        submitPlaceEdit);
-
-    formLayout->addRow(
-        "证明人：",
-        submitWitnessEdit);
-
-    formLayout->addRow(
-        "服务描述：",
+        descriptionLabel,
         submitDescriptionEdit);
 
-    mainLayout->addLayout(formLayout);
+    formCardLayout->addLayout(formLayout);
 
     QPushButton *submitButton =
         new QPushButton("提交志愿记录");
+    submitButton->setObjectName(
+        "studentSubmitActionButton");
+    submitButton->setMinimumSize(180, 44);
+    submitButton->setCursor(Qt::PointingHandCursor);
+    formCardLayout->addWidget(
+        submitButton,
+        0,
+        Qt::AlignRight);
 
-    submitButton->setStyleSheet(
-        StyleHelper::primaryButton());
-
-    mainLayout->addWidget(submitButton);
+    mainLayout->addWidget(formCard);
     mainLayout->addStretch();
 
     connect(
@@ -1530,41 +1562,75 @@ void StudentMainWindow::buildSubmitPage()
 void StudentMainWindow::buildScorePage()
 {
     scorePage = new QWidget;
+    scorePage->setObjectName("studentScorePage");
+    scorePage->setStyleSheet(
+        StyleHelper::studentRemainingPages());
 
     QVBoxLayout *mainLayout =
         new QVBoxLayout(scorePage);
+    mainLayout->setContentsMargins(28, 24, 28, 24);
+    mainLayout->setSpacing(16);
 
     QLabel *titleLabel =
         new QLabel("我的积分");
-
-    titleLabel->setStyleSheet(
-        StyleHelper::title());
-
+    titleLabel->setObjectName("studentScorePageTitle");
     mainLayout->addWidget(titleLabel);
 
-    QLabel *totalTitle =
-        new QLabel("总积分");
+    QLabel *subtitleLabel = new QLabel(
+        "查看累计积分，并按月份或日期范围查询积分");
+    subtitleLabel->setObjectName(
+        "studentRemainingPageSubtitle");
+    mainLayout->addWidget(subtitleLabel);
+
+    QFrame *totalCard = new QFrame;
+    totalCard->setObjectName("studentScoreTotalCard");
+    QHBoxLayout *totalLayout =
+        new QHBoxLayout(totalCard);
+    totalLayout->setContentsMargins(24, 20, 24, 20);
+    totalLayout->setSpacing(18);
+
+    QVBoxLayout *totalTextLayout = new QVBoxLayout;
+    totalTextLayout->setSpacing(6);
+    QLabel *totalTitle = new QLabel("总积分");
+    totalTitle->setObjectName("studentScoreMetricLabel");
 
     totalScoreLabel =
         new QLabel("0.00");
+    totalScoreLabel->setObjectName(
+        "studentScoreMetricValue");
 
     QPushButton *refreshButton =
         new QPushButton("刷新积分");
+    refreshButton->setObjectName(
+        "studentScoreRefreshButton");
+    refreshButton->setMinimumHeight(40);
+    refreshButton->setCursor(Qt::PointingHandCursor);
 
-    refreshButton->setStyleSheet(
-        StyleHelper::secondaryButton());
+    totalTextLayout->addWidget(totalTitle);
+    totalTextLayout->addWidget(totalScoreLabel);
+    totalLayout->addLayout(totalTextLayout);
+    totalLayout->addStretch();
+    totalLayout->addWidget(refreshButton);
+    mainLayout->addWidget(totalCard);
 
-    mainLayout->addWidget(totalTitle);
-    mainLayout->addWidget(totalScoreLabel);
-    mainLayout->addWidget(refreshButton);
+    QFrame *monthCard = new QFrame;
+    monthCard->setObjectName("studentScoreQueryCard");
+    QVBoxLayout *monthCardLayout =
+        new QVBoxLayout(monthCard);
+    monthCardLayout->setContentsMargins(24, 20, 24, 22);
+    monthCardLayout->setSpacing(14);
 
-    QLabel *monthTitle =
-        new QLabel("月度积分");
+    QLabel *monthTitle = new QLabel("月度积分");
+    monthTitle->setObjectName("studentScoreSectionTitle");
+    monthCardLayout->addWidget(monthTitle);
 
     monthDateEdit =
         new QDateEdit;
-
+    monthDateEdit->setObjectName(
+        "studentScoreMonthDate");
     monthDateEdit->setCalendarPopup(true);
+    monthDateEdit->calendarWidget()->setStyleSheet(
+        StyleHelper::studentRecordsCalendarPopup());
 
     monthDateEdit->setDisplayFormat(
         "yyyy/MM");
@@ -1574,38 +1640,76 @@ void StudentMainWindow::buildScorePage()
 
     QPushButton *monthButton =
         new QPushButton("查询月度积分");
-
-    monthButton->setStyleSheet(
-        StyleHelper::secondaryButton());
+    monthButton->setObjectName(
+        "studentScoreQueryButton");
+    monthButton->setMinimumHeight(40);
+    monthButton->setCursor(Qt::PointingHandCursor);
 
     monthlyScoreLabel =
-        new QLabel("请选择月份");
+        new QLabel("尚未查询");
+    monthlyScoreLabel->setObjectName(
+        "studentScoreResult");
 
     QFormLayout *monthLayout =
         new QFormLayout;
+    monthLayout->setLabelAlignment(
+        Qt::AlignLeft | Qt::AlignVCenter);
+    monthLayout->setHorizontalSpacing(18);
+    monthLayout->setVerticalSpacing(14);
 
     monthLayout->addRow(
         "查询月份：",
         monthDateEdit);
 
-    monthLayout->addRow(
-        monthButton,
-        monthlyScoreLabel);
+    QHBoxLayout *monthResultLayout = new QHBoxLayout;
+    monthResultLayout->setSpacing(14);
+    monthResultLayout->addWidget(monthButton);
+    monthResultLayout->addWidget(monthlyScoreLabel);
+    monthResultLayout->addStretch();
+    monthLayout->addRow(monthResultLayout);
 
-    mainLayout->addWidget(monthTitle);
-    mainLayout->addLayout(monthLayout);
+    monthCardLayout->addLayout(monthLayout);
+    mainLayout->addWidget(monthCard);
 
     QLabel *semesterTitle =
         new QLabel("学期积分");
+    semesterTitle->setObjectName(
+        "studentScoreSectionTitle");
+
+    QFrame *semesterCard = new QFrame;
+    semesterCard->setObjectName("studentScoreQueryCard");
+    QVBoxLayout *semesterCardLayout =
+        new QVBoxLayout(semesterCard);
+    semesterCardLayout->setContentsMargins(
+        24,
+        20,
+        24,
+        22);
+    semesterCardLayout->setSpacing(8);
+    semesterCardLayout->addWidget(semesterTitle);
+
+    QLabel *semesterDescription = new QLabel(
+        "按当前选择的日期范围查询");
+    semesterDescription->setObjectName(
+        "studentRemainingPageSubtitle");
+    semesterCardLayout->addWidget(semesterDescription);
 
     semesterStartEdit =
         new QDateEdit;
+    semesterStartEdit->setObjectName(
+        "studentScoreRangeStartDate");
 
     semesterEndEdit =
         new QDateEdit;
+    semesterEndEdit->setObjectName(
+        "studentScoreRangeEndDate");
 
     semesterStartEdit->setCalendarPopup(true);
     semesterEndEdit->setCalendarPopup(true);
+    semesterStartEdit->calendarWidget()->setStyleSheet(
+        StyleHelper::studentRecordsCalendarPopup());
+    semesterEndEdit->calendarWidget()->setStyleSheet(
+        StyleHelper::studentRecordsCalendarPopup());
 
     semesterStartEdit->setDisplayFormat(
         "yyyy/MM/dd");
@@ -1627,15 +1731,22 @@ void StudentMainWindow::buildScorePage()
 
     QPushButton *semesterButton =
         new QPushButton("查询学期积分");
-
-    semesterButton->setStyleSheet(
-        StyleHelper::secondaryButton());
+    semesterButton->setObjectName(
+        "studentScoreQueryButton");
+    semesterButton->setMinimumHeight(40);
+    semesterButton->setCursor(Qt::PointingHandCursor);
 
     semesterScoreLabel =
-        new QLabel("请选择学期时间范围");
+        new QLabel("尚未查询");
+    semesterScoreLabel->setObjectName(
+        "studentScoreResult");
 
     QFormLayout *semesterLayout =
         new QFormLayout;
+    semesterLayout->setLabelAlignment(
+        Qt::AlignLeft | Qt::AlignVCenter);
+    semesterLayout->setHorizontalSpacing(18);
+    semesterLayout->setVerticalSpacing(14);
 
     semesterLayout->addRow(
         "开始日期：",
@@ -1645,12 +1756,16 @@ void StudentMainWindow::buildScorePage()
         "结束日期：",
         semesterEndEdit);
 
-    semesterLayout->addRow(
-        semesterButton,
-        semesterScoreLabel);
+    QHBoxLayout *semesterResultLayout =
+        new QHBoxLayout;
+    semesterResultLayout->setSpacing(14);
+    semesterResultLayout->addWidget(semesterButton);
+    semesterResultLayout->addWidget(semesterScoreLabel);
+    semesterResultLayout->addStretch();
+    semesterLayout->addRow(semesterResultLayout);
 
-    mainLayout->addWidget(semesterTitle);
-    mainLayout->addLayout(semesterLayout);
+    semesterCardLayout->addLayout(semesterLayout);
+    mainLayout->addWidget(semesterCard);
 
     mainLayout->addStretch();
 
@@ -1671,6 +1786,37 @@ void StudentMainWindow::buildScorePage()
         &QPushButton::clicked,
         this,
         &StudentMainWindow::calculateSemesterScore);
+
+    connect(
+        monthDateEdit,
+        &QDateEdit::dateChanged,
+        this,
+        [this](const QDate &) {
+            if (monthlyScoreLabel->text().startsWith("月度积分："))
+            {
+                monthlyScoreLabel->setText("请点击查询");
+            }
+        });
+
+    const auto resetDateRangeScoreResult =
+        [this](const QDate &) {
+            if (semesterScoreLabel->text().startsWith("日期范围积分："))
+            {
+                semesterScoreLabel->setText("请点击查询");
+            }
+        };
+
+    connect(
+        semesterStartEdit,
+        &QDateEdit::dateChanged,
+        this,
+        resetDateRangeScoreResult);
+
+    connect(
+        semesterEndEdit,
+        &QDateEdit::dateChanged,
+        this,
+        resetDateRangeScoreResult);
 
     refreshScorePage();
 }
@@ -2463,13 +2609,27 @@ void StudentMainWindow::modifySelectedRecord()
             "修改志愿记录",
             "服务时长（小时）：",
             record->getDuration(),
-            0.1,
+            0.0,
             10000.0,
             1,
-            &ok);
+            &ok,
+            Qt::WindowFlags(),
+            0.5);
 
     if (!ok)
     {
+        return;
+    }
+
+    const double halfHourUnits = newDuration * 2.0;
+    if (newDuration <= 0.0 ||
+        std::abs(halfHourUnits - std::round(halfHourUnits)) > 1e-9)
+    {
+        QMessageBox::information(
+            this,
+            "提示",
+            "服务时长必须大于 0，并以 0.5 小时为单位。");
+
         return;
     }
 
@@ -2770,6 +2930,18 @@ void StudentMainWindow::submitVolunteerRecord()
         return;
     }
 
+    const double halfHourUnits = duration * 2.0;
+    if (duration <= 0.0 ||
+        std::abs(halfHourUnits - std::round(halfHourUnits)) > 1e-9)
+    {
+        QMessageBox::information(
+            this,
+            "提示",
+            "服务时长必须大于 0，并以 0.5 小时为单位。");
+
+        return;
+    }
+
     std::string recordId =
         dataManager->generateRecordId();
 
@@ -2802,7 +2974,7 @@ void StudentMainWindow::submitVolunteerRecord()
     submitDateEdit->setDate(
         QDate::currentDate());
 
-    submitDurationSpin->setValue(0.1);
+    submitDurationSpin->setValue(0.0);
 
     submitPlaceEdit->clear();
     submitWitnessEdit->clear();
@@ -2871,7 +3043,7 @@ void StudentMainWindow::calculateMonthlyScore()
                 endDate);
 
     monthlyScoreLabel->setText(
-        QString::number(score, 'f', 2));
+        QString("月度积分：%1").arg(score, 0, 'f', 2));
 }
 
 void StudentMainWindow::calculateSemesterScore()
@@ -2915,7 +3087,7 @@ void StudentMainWindow::calculateSemesterScore()
                 endDate);
 
     semesterScoreLabel->setText(
-        QString::number(score, 'f', 2));
+        QString("日期范围积分：%1").arg(score, 0, 'f', 2));
 }
 
 void StudentMainWindow::refreshRankingPage()

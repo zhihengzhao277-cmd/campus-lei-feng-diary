@@ -26,6 +26,8 @@ public:
 
     static QString studentRecordsCalendarPopup();
 
+    static QString studentRemainingPages();
+
     static QString pageBackground();
 
     static QString card();

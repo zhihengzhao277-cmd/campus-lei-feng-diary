@@ -10,6 +10,12 @@ public:
 
     static QString studentDashboard();
 
+    static QString administratorDashboard();
+
+    static QString studentRecordsPage();
+
+    static QString studentRecordsCalendarPopup();
+
     static QString pageBackground();
 
     static QString card();

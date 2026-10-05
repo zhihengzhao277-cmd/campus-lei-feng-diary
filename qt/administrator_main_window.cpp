@@ -298,320 +298,119 @@ void AdministratorMainWindow::buildInterface()
 void AdministratorMainWindow::buildHomePage()
 {
     homePage = new QWidget;
-
-    QVBoxLayout *mainLayout =
-        new QVBoxLayout(homePage);
-
-    mainLayout->setContentsMargins(
-        8,
-        4,
-        8,
-        8);
-
-    mainLayout->setSpacing(18);
-
-    // =========================
-    // 标题
-    // =========================
-
-    QLabel *titleLabel =
-        new QLabel("管理员主页");
-
-    QFont titleFont =
-        titleLabel->font();
-
-    titleFont.setPointSize(20);
-    titleFont.setBold(true);
-
-    titleLabel->setFont(
-        titleFont);
-
-    titleLabel->setStyleSheet(
-        "QLabel {"
-        "color: #222222;"
-        "background: transparent;"
-        "}");
-
-    QLabel *descriptionLabel =
-        new QLabel(
-            "查看校园志愿服务系统当前运行情况");
-
-    descriptionLabel->setStyleSheet(
-        "QLabel {"
-        "color: #888888;"
-        "font-size: 14px;"
-        "background: transparent;"
-        "}");
-
-    mainLayout->addWidget(
-        titleLabel);
-
-    mainLayout->addWidget(
-        descriptionLabel);
-
-    // =========================
-    // 统计卡片
-    // =========================
-
-    QHBoxLayout *cardLayout =
-        new QHBoxLayout;
-
-    cardLayout->setSpacing(16);
-
-    // -------- 学生数 --------
-
-    QFrame *studentCard =
-        new QFrame;
-
-    studentCard->setStyleSheet(
-        StyleHelper::card());
-
-    QVBoxLayout *studentLayout =
-        new QVBoxLayout(
-            studentCard);
-
-    studentLayout->setContentsMargins(
-        20,
-        18,
-        20,
-        18);
-
-    QLabel *studentTitle =
-        new QLabel("学生数量");
-
-    studentTitle->setStyleSheet(
-        "color: #777777;"
-        "background: transparent;");
-
-    studentCountLabel =
-        new QLabel("0");
-
-    QFont numberFont =
-        studentCountLabel->font();
-
-    numberFont.setPointSize(25);
-    numberFont.setBold(true);
-
-    studentCountLabel->setFont(
-        numberFont);
-
-    studentCountLabel->setStyleSheet(
-        "color: #222222;"
-        "background: transparent;");
-
-    studentLayout->addWidget(
-        studentTitle);
-
-    studentLayout->addWidget(
-        studentCountLabel);
-
-    // -------- 待审核 --------
-
-    QFrame *pendingCard =
-        new QFrame;
-
-    pendingCard->setStyleSheet(
-        "QFrame {"
-        "background-color: white;"
-        "border: 1px solid #eeeeee;"
-        "border-radius: 16px;"
-        "}");
-
-    QVBoxLayout *pendingLayout =
-        new QVBoxLayout(
-            pendingCard);
-
-    pendingLayout->setContentsMargins(
-        20,
-        18,
-        20,
-        18);
-
-    QLabel *pendingTitle =
-        new QLabel("待审核记录");
-
-    pendingTitle->setStyleSheet(
-        "color: #777777;"
-        "background: transparent;");
-
-    pendingCountLabel =
-        new QLabel("0");
-
-    pendingCountLabel->setFont(
-        numberFont);
-
-    pendingCountLabel->setStyleSheet(
-        "color: #b91f35;"
-        "background: transparent;");
-
-    pendingLayout->addWidget(
-        pendingTitle);
-
-    pendingLayout->addWidget(
-        pendingCountLabel);
-
-    // -------- 已通过 --------
-
-    QFrame *approvedCard =
-        new QFrame;
-
-    approvedCard->setStyleSheet(
-        "QFrame {"
-        "background-color: white;"
-        "border: 1px solid #eeeeee;"
-        "border-radius: 16px;"
-        "}");
-
-    QVBoxLayout *approvedLayout =
-        new QVBoxLayout(
-            approvedCard);
-
-    approvedLayout->setContentsMargins(
-        20,
-        18,
-        20,
-        18);
-
-    QLabel *approvedTitle =
-        new QLabel("已通过记录");
-
-    approvedTitle->setStyleSheet(
-        "color: #777777;"
-        "background: transparent;");
-
-    approvedCountLabel =
-        new QLabel("0");
-
-    approvedCountLabel->setFont(
-        numberFont);
-
-    approvedCountLabel->setStyleSheet(
-        "color: #222222;"
-        "background: transparent;");
-
-    approvedLayout->addWidget(
-        approvedTitle);
-
-    approvedLayout->addWidget(
-        approvedCountLabel);
-
-    // -------- 总记录 --------
-
-    QFrame *recordCard =
-        new QFrame;
-
-    recordCard->setStyleSheet(
-        "QFrame {"
-        "background-color: white;"
-        "border: 1px solid #eeeeee;"
-        "border-radius: 16px;"
-        "}");
-
-    QVBoxLayout *recordLayout =
-        new QVBoxLayout(
-            recordCard);
-
-    recordLayout->setContentsMargins(
-        20,
-        18,
-        20,
-        18);
-
-    QLabel *recordTitle =
-        new QLabel("志愿总记录");
-
-    recordTitle->setStyleSheet(
-        "color: #777777;"
-        "background: transparent;");
-
-    recordCountLabel =
-        new QLabel("0");
-
-    recordCountLabel->setFont(
-        numberFont);
-
-    recordCountLabel->setStyleSheet(
-        "color: #222222;"
-        "background: transparent;");
-
-    recordLayout->addWidget(
-        recordTitle);
-
-    recordLayout->addWidget(
-        recordCountLabel);
-
-    cardLayout->addWidget(
-        studentCard);
-
-    cardLayout->addWidget(
-        pendingCard);
-
-    cardLayout->addWidget(
-        approvedCard);
-
-    cardLayout->addWidget(
-        recordCard);
-
-    mainLayout->addLayout(
-        cardLayout);
-
-    // =========================
-    // 管理提示
-    // =========================
-
-    QFrame *tipCard =
-        new QFrame;
-
-    tipCard->setStyleSheet(
-        "QFrame {"
-        "background-color: white;"
-        "border: 1px solid #eeeeee;"
-        "border-radius: 16px;"
-        "}");
-
-    QVBoxLayout *tipLayout =
-        new QVBoxLayout(
-            tipCard);
-
-    tipLayout->setContentsMargins(
-        22,
-        20,
-        22,
-        20);
-
-    QLabel *tipTitle =
-        new QLabel("管理工作台");
-
-    QFont tipFont =
-        tipTitle->font();
-
-    tipFont.setPointSize(15);
-    tipFont.setBold(true);
-
-    tipTitle->setFont(
-        tipFont);
-
-    QLabel *tipText =
-        new QLabel(
-            "你可以通过左侧菜单进行志愿审核、"
-            "查看数据统计，以及创建学生和管理员账号。");
-
-    tipText->setWordWrap(true);
-
-    tipText->setStyleSheet(
-        "color: #777777;"
-        "background: transparent;");
-
-    tipLayout->addWidget(
-        tipTitle);
-
-    tipLayout->addWidget(
-        tipText);
-
-    mainLayout->addWidget(
-        tipCard);
-
-    mainLayout->addStretch();
+    homePage->setObjectName("administratorDashboard");
+    homePage->setStyleSheet(
+        StyleHelper::administratorDashboard());
+
+    QVBoxLayout *mainLayout = new QVBoxLayout(homePage);
+    mainLayout->setContentsMargins(22, 20, 22, 22);
+    mainLayout->setSpacing(16);
+
+    QHBoxLayout *headerLayout = new QHBoxLayout;
+    headerLayout->setSpacing(16);
+    QVBoxLayout *headingTextLayout = new QVBoxLayout;
+    headingTextLayout->setSpacing(4);
+
+    QLabel *titleLabel = new QLabel("管理员主页");
+    titleLabel->setObjectName("adminDashboardTitle");
+    QLabel *descriptionLabel = new QLabel(
+        "查看校园志愿服务进展，快速进入审核与管理页面。");
+    descriptionLabel->setObjectName("adminDashboardSubtitle");
+
+    headingTextLayout->addWidget(titleLabel);
+    headingTextLayout->addWidget(descriptionLabel);
+    headerLayout->addLayout(headingTextLayout, 1);
+
+    QLabel *identityLabel = new QLabel(
+        welcomeLabel == nullptr
+            ? QStringLiteral("管理员")
+            : welcomeLabel->text());
+    identityLabel->setObjectName("adminDashboardIdentity");
+    identityLabel->setAlignment(
+        Qt::AlignRight | Qt::AlignVCenter);
+    headerLayout->addWidget(identityLabel, 0, Qt::AlignRight);
+    mainLayout->addLayout(headerLayout);
+
+    QHBoxLayout *cardLayout = new QHBoxLayout;
+    cardLayout->setSpacing(12);
+    const auto addStatCard = [&cardLayout](
+                                 const QString &title,
+                                 QLabel *&valueLabel)
+    {
+        QFrame *card = new QFrame;
+        card->setObjectName("adminDashboardStatCard");
+        card->setMinimumHeight(116);
+
+        QVBoxLayout *layout = new QVBoxLayout(card);
+        layout->setContentsMargins(16, 12, 16, 12);
+        layout->setSpacing(6);
+
+        QLabel *caption = new QLabel(title);
+        caption->setObjectName("adminDashboardStatCaption");
+        valueLabel = new QLabel("0");
+        valueLabel->setObjectName("adminDashboardStatValue");
+
+        layout->addStretch(1);
+        layout->addWidget(caption);
+        layout->addWidget(valueLabel);
+        layout->addStretch(1);
+        cardLayout->addWidget(card, 1);
+    };
+
+    addStatCard("学生数量", studentCountLabel);
+    addStatCard("待审核记录", pendingCountLabel);
+    addStatCard("已通过记录", approvedCountLabel);
+    addStatCard("志愿总记录", recordCountLabel);
+    mainLayout->addLayout(cardLayout);
+
+    QFrame *quickSection = new QFrame;
+    quickSection->setObjectName("adminDashboardQuickSection");
+    QVBoxLayout *quickLayout = new QVBoxLayout(quickSection);
+    quickLayout->setContentsMargins(16, 14, 16, 16);
+    quickLayout->setSpacing(10);
+
+    QLabel *quickTitle = new QLabel("快捷管理");
+    quickTitle->setObjectName("adminDashboardSectionTitle");
+    QLabel *quickSubtitle = new QLabel(
+        "选择入口后将打开对应的现有管理页面。");
+    quickSubtitle->setObjectName("adminDashboardSectionSubtitle");
+    quickLayout->addWidget(quickTitle);
+    quickLayout->addWidget(quickSubtitle);
+
+    QHBoxLayout *actionsLayout = new QHBoxLayout;
+    actionsLayout->setSpacing(8);
+    QPushButton *reviewButton = new QPushButton("志愿审核");
+    reviewButton->setObjectName("adminDashboardPrimaryAction");
+    QPushButton *statisticsButton = new QPushButton("数据统计");
+    statisticsButton->setObjectName("adminDashboardAction");
+    QPushButton *createStudentButton = new QPushButton("创建学生");
+    createStudentButton->setObjectName("adminDashboardAction");
+    QPushButton *createAdministratorButton =
+        new QPushButton("创建管理员");
+    createAdministratorButton->setObjectName("adminDashboardAction");
+
+    for (QPushButton *button :
+         {reviewButton,
+          statisticsButton,
+          createStudentButton,
+          createAdministratorButton})
+    {
+        button->setCursor(Qt::PointingHandCursor);
+        button->setMinimumHeight(40);
+        actionsLayout->addWidget(button, 1);
+    }
+    quickLayout->addLayout(actionsLayout);
+    mainLayout->addWidget(quickSection);
+    mainLayout->addStretch(1);
+
+    connect(reviewButton, &QPushButton::clicked,
+            this, [this]() { navigationList->setCurrentRow(1); });
+    connect(statisticsButton, &QPushButton::clicked,
+            this, [this]() { navigationList->setCurrentRow(2); });
+    connect(createStudentButton, &QPushButton::clicked,
+            this, [this]() { navigationList->setCurrentRow(3); });
+    connect(createAdministratorButton, &QPushButton::clicked,
+            this, [this]() { navigationList->setCurrentRow(4); });
 
     refreshHomePage();
 }

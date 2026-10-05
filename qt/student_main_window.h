@@ -66,6 +66,7 @@ private:
     QLabel *dashboardEmptyBadgesLabel;
     QWidget *recordsPage;
     QTableWidget *recordsTable;
+    QLabel *recordsEmptyLabel;
     void buildInterface();
     void buildHomePage();
     void buildRecordsPage();

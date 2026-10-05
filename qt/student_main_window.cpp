@@ -8,14 +8,21 @@
 #include <QTextEdit>
 #include <QComboBox>
 #include <QDateEdit>
+#include <QCalendarWidget>
 #include <QDate>
+#include <QBrush>
+#include <QColor>
 #include <QAbstractItemView>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QPainter>
 #include <QPushButton>
+#include <QStyle>
+#include <QStyleOptionViewItem>
+#include <QStyledItemDelegate>
 #include <QStackedWidget>
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -35,6 +42,26 @@
 
 namespace
 {
+    class RecordsNoCellFocusDelegate final :
+        public QStyledItemDelegate
+    {
+    public:
+        using QStyledItemDelegate::QStyledItemDelegate;
+
+        void paint(
+            QPainter *painter,
+            const QStyleOptionViewItem &option,
+            const QModelIndex &index) const override
+        {
+            QStyleOptionViewItem itemOption(option);
+            itemOption.state &= ~QStyle::State_HasFocus;
+            QStyledItemDelegate::paint(
+                painter,
+                itemOption,
+                index);
+        }
+    };
+
     bool containsInvalidPersistenceCharacter(
         const QString &text)
     {
@@ -61,7 +88,9 @@ StudentMainWindow::StudentMainWindow(
       dashboardApprovedRecordsLabel(nullptr),
       dashboardEmptyBadgesLabel(nullptr),
       recordsPage(nullptr),
-      recordsTable(nullptr), categoryFilter(nullptr),
+      recordsTable(nullptr),
+      recordsEmptyLabel(nullptr),
+      categoryFilter(nullptr),
       startDateEdit(nullptr),
       endDateEdit(nullptr),
       submitPage(nullptr),
@@ -480,38 +509,62 @@ void StudentMainWindow::refreshDashboard()
 void StudentMainWindow::buildRecordsPage()
 {
     recordsPage = new QWidget;
+    recordsPage->setObjectName("studentRecordsPage");
+    recordsPage->setStyleSheet(
+        StyleHelper::studentRecordsPage());
 
     QVBoxLayout *layout =
         new QVBoxLayout(recordsPage);
+    layout->setContentsMargins(22, 20, 22, 22);
+    layout->setSpacing(16);
 
     QHBoxLayout *titleLayout =
         new QHBoxLayout;
+    titleLayout->setSpacing(16);
+
+    QVBoxLayout *headingLayout =
+        new QVBoxLayout;
+    headingLayout->setSpacing(4);
 
     QLabel *titleLabel =
         new QLabel("我的志愿记录");
+    titleLabel->setObjectName("studentRecordsTitle");
 
-    titleLabel->setStyleSheet(
-        StyleHelper::title());
+    QLabel *subtitleLabel = new QLabel(
+        "查询个人志愿服务记录与审核状态。");
+    subtitleLabel->setObjectName("studentRecordsSubtitle");
+    headingLayout->addWidget(titleLabel);
+    headingLayout->addWidget(subtitleLabel);
 
     QPushButton *refreshButton =
         new QPushButton("刷新");
+    refreshButton->setObjectName("studentRecordsRefreshButton");
+    refreshButton->setCursor(Qt::PointingHandCursor);
+    refreshButton->setMinimumHeight(38);
 
-    refreshButton->setStyleSheet(
-        StyleHelper::secondaryButton());
-
-    titleLayout->addWidget(titleLabel);
+    titleLayout->addLayout(headingLayout, 1);
     titleLayout->addStretch();
     titleLayout->addWidget(refreshButton);
-
     layout->addLayout(titleLayout);
 
-    // ===== 查询条件 =====
+    QFrame *filterCard = new QFrame;
+    filterCard->setObjectName("studentRecordsFilterCard");
+    QVBoxLayout *filterCardLayout =
+        new QVBoxLayout(filterCard);
+    filterCardLayout->setContentsMargins(16, 14, 16, 16);
+    filterCardLayout->setSpacing(10);
+
+    QLabel *filterTitle = new QLabel("筛选记录");
+    filterTitle->setObjectName("studentRecordsSectionTitle");
+    filterCardLayout->addWidget(filterTitle);
 
     QHBoxLayout *filterLayout =
         new QHBoxLayout;
+    filterLayout->setSpacing(10);
 
     categoryFilter =
         new QComboBox;
+    categoryFilter->setObjectName("studentRecordsCategoryFilter");
 
     categoryFilter->addItem("全部类别", "");
 
@@ -527,17 +580,20 @@ void StudentMainWindow::buildRecordsPage()
         "互助服务",
         "C03");
 
-    categoryFilter->setStyleSheet(
-        StyleHelper::input());
-
     startDateEdit =
         new QDateEdit;
+    startDateEdit->setObjectName("studentRecordsStartDate");
 
     endDateEdit =
         new QDateEdit;
+    endDateEdit->setObjectName("studentRecordsEndDate");
 
     startDateEdit->setCalendarPopup(true);
     endDateEdit->setCalendarPopup(true);
+    startDateEdit->calendarWidget()->setStyleSheet(
+        StyleHelper::studentRecordsCalendarPopup());
+    endDateEdit->calendarWidget()->setStyleSheet(
+        StyleHelper::studentRecordsCalendarPopup());
 
     startDateEdit->setDisplayFormat(
         "yyyy/MM/dd");
@@ -553,67 +609,71 @@ void StudentMainWindow::buildRecordsPage()
 
     QPushButton *searchButton =
         new QPushButton("查询");
-
-    searchButton->setStyleSheet(
-        StyleHelper::secondaryButton());
+    searchButton->setObjectName("studentRecordsSearchButton");
+    searchButton->setCursor(Qt::PointingHandCursor);
+    searchButton->setMinimumHeight(38);
 
     QPushButton *clearButton =
-        new QPushButton("重置");
+        new QPushButton("清除筛选");
+    clearButton->setObjectName("studentRecordsClearButton");
+    clearButton->setCursor(Qt::PointingHandCursor);
+    clearButton->setMinimumHeight(38);
 
-    clearButton->setStyleSheet(
-        StyleHelper::secondaryButton());
+    const auto addFilterField = [&filterLayout](
+                                    const QString &labelText,
+                                    QWidget *control,
+                                    int stretch)
+    {
+        QVBoxLayout *fieldLayout = new QVBoxLayout;
+        fieldLayout->setSpacing(5);
+        QLabel *fieldLabel = new QLabel(labelText);
+        fieldLabel->setObjectName("studentRecordsFieldLabel");
+        fieldLayout->addWidget(fieldLabel);
+        fieldLayout->addWidget(control);
+        filterLayout->addLayout(fieldLayout, stretch);
+    };
 
-    filterLayout->addWidget(
-        new QLabel("类别："));
+    addFilterField("志愿类别", categoryFilter, 3);
+    addFilterField("开始日期", startDateEdit, 2);
+    addFilterField("结束日期", endDateEdit, 2);
+    filterLayout->addWidget(searchButton, 0, Qt::AlignBottom);
+    filterLayout->addWidget(clearButton, 0, Qt::AlignBottom);
+    filterCardLayout->addLayout(filterLayout);
+    layout->addWidget(filterCard);
 
-    filterLayout->addWidget(
-        categoryFilter);
+    QFrame *tableCard = new QFrame;
+    tableCard->setObjectName("studentRecordsTableCard");
+    QVBoxLayout *tableCardLayout =
+        new QVBoxLayout(tableCard);
+    tableCardLayout->setContentsMargins(16, 14, 16, 16);
+    tableCardLayout->setSpacing(10);
 
-    filterLayout->addWidget(
-        new QLabel("开始日期："));
-
-    filterLayout->addWidget(
-        startDateEdit);
-
-    filterLayout->addWidget(
-        new QLabel("结束日期："));
-
-    filterLayout->addWidget(
-        endDateEdit);
-
-    filterLayout->addWidget(
-        searchButton);
-
-    filterLayout->addWidget(
-        clearButton);
-
-    layout->addLayout(filterLayout);
-
-    QHBoxLayout *actionLayout =
-        new QHBoxLayout;
+    QHBoxLayout *tableHeaderLayout = new QHBoxLayout;
+    QLabel *tableTitle = new QLabel("记录明细");
+    tableTitle->setObjectName("studentRecordsSectionTitle");
+    tableHeaderLayout->addWidget(tableTitle);
+    tableHeaderLayout->addStretch();
 
     QPushButton *modifyButton =
         new QPushButton("修改选中记录");
-
-    modifyButton->setStyleSheet(
-        StyleHelper::secondaryButton());
+    modifyButton->setObjectName("studentRecordsModifyButton");
+    modifyButton->setCursor(Qt::PointingHandCursor);
+    modifyButton->setMinimumHeight(38);
 
     QPushButton *deleteButton =
         new QPushButton("删除选中记录");
-
-    deleteButton->setStyleSheet(
-        StyleHelper::secondaryButton());
-
-    actionLayout->addWidget(modifyButton);
-    actionLayout->addWidget(deleteButton);
-    actionLayout->addStretch();
-
-    layout->addLayout(actionLayout);
-
-    // ===== 表格 =====
+    deleteButton->setObjectName("studentRecordsDeleteButton");
+    deleteButton->setCursor(Qt::PointingHandCursor);
+    deleteButton->setMinimumHeight(38);
+    tableHeaderLayout->addWidget(modifyButton);
+    tableHeaderLayout->addWidget(deleteButton);
+    tableCardLayout->addLayout(tableHeaderLayout);
 
     recordsTable =
         new QTableWidget;
+    recordsTable->setObjectName("studentRecordsTable");
+    recordsTable->setItemDelegate(
+        new RecordsNoCellFocusDelegate(recordsTable));
 
     recordsTable->setColumnCount(6);
 
@@ -636,15 +696,27 @@ void StudentMainWindow::buildRecordsPage()
 
     recordsTable->verticalHeader()
         ->setVisible(false);
+    recordsTable->verticalHeader()
+        ->setDefaultSectionSize(42);
 
     recordsTable->horizontalHeader()
         ->setSectionResizeMode(
             QHeaderView::Stretch);
+    recordsTable->setAlternatingRowColors(true);
+    recordsTable->setShowGrid(false);
+    recordsTable->setMinimumHeight(230);
 
-    recordsTable->setStyleSheet(
-        StyleHelper::table());
+    recordsEmptyLabel = new QLabel(
+        "当前筛选条件下没有匹配的志愿记录。");
+    recordsEmptyLabel->setObjectName("studentRecordsEmptyState");
+    recordsEmptyLabel->setAlignment(Qt::AlignCenter);
+    recordsEmptyLabel->setWordWrap(true);
+    recordsEmptyLabel->setMinimumHeight(230);
 
-    layout->addWidget(recordsTable);
+    recordsTable->hide();
+    tableCardLayout->addWidget(recordsTable, 1);
+    tableCardLayout->addWidget(recordsEmptyLabel, 1);
+    layout->addWidget(tableCard, 1);
 
     connect(
         refreshButton,
@@ -1787,6 +1859,8 @@ void StudentMainWindow::refreshMyRecords()
             new QTableWidgetItem(
                 QString::fromStdString(
                     record->getRecordId())));
+        recordsTable->item(row, 0)->setTextAlignment(
+            Qt::AlignLeft | Qt::AlignVCenter);
 
         recordsTable->setItem(
             row,
@@ -1794,22 +1868,29 @@ void StudentMainWindow::refreshMyRecords()
             new QTableWidgetItem(
                 categoryName(
                     record->getCategoryId())));
+        recordsTable->item(row, 1)->setTextAlignment(
+            Qt::AlignLeft | Qt::AlignVCenter);
 
         recordsTable->setItem(
             row,
             2,
             new QTableWidgetItem(
                 recordDate));
+        recordsTable->item(row, 2)->setTextAlignment(
+            Qt::AlignCenter);
 
+        QTableWidgetItem *durationItem = new QTableWidgetItem(
+            QString::number(
+                record->getDuration(),
+                'f',
+                1) +
+            " 小时");
+        durationItem->setTextAlignment(
+            Qt::AlignRight | Qt::AlignVCenter);
         recordsTable->setItem(
             row,
             3,
-            new QTableWidgetItem(
-                QString::number(
-                    record->getDuration(),
-                    'f',
-                    1) +
-                " 小时"));
+            durationItem);
 
         QString status;
 
@@ -1828,10 +1909,36 @@ void StudentMainWindow::refreshMyRecords()
             status = "已驳回";
         }
 
-        recordsTable->setItem(
-            row,
-            4,
-            new QTableWidgetItem(status));
+        QTableWidgetItem *statusItem =
+            new QTableWidgetItem(status);
+        QFont statusFont = statusItem->font();
+        statusFont.setBold(true);
+        statusItem->setFont(statusFont);
+        statusItem->setTextAlignment(Qt::AlignCenter);
+
+        if (record->getStatus() == RecordStatus::Pending)
+        {
+            statusItem->setForeground(
+                QBrush(QColor("#B7791F")));
+            statusItem->setBackground(
+                QBrush(QColor("#FFF8E9")));
+        }
+        else if (record->getStatus() == RecordStatus::Approved)
+        {
+            statusItem->setForeground(
+                QBrush(QColor("#2F855A")));
+            statusItem->setBackground(
+                QBrush(QColor("#EAF5EF")));
+        }
+        else
+        {
+            statusItem->setForeground(
+                QBrush(QColor("#C2413A")));
+            statusItem->setBackground(
+                QBrush(QColor("#FBECEB")));
+        }
+
+        recordsTable->setItem(row, 4, statusItem);
 
         recordsTable->setItem(
             row,
@@ -1841,7 +1948,13 @@ void StudentMainWindow::refreshMyRecords()
                     record->getScore(),
                     'f',
                     2)));
+        recordsTable->item(row, 5)->setTextAlignment(
+            Qt::AlignRight | Qt::AlignVCenter);
     }
+
+    const bool hasRecords = recordsTable->rowCount() > 0;
+    recordsTable->setVisible(hasRecords);
+    recordsEmptyLabel->setVisible(!hasRecords);
 }
 
 QString StudentMainWindow::statusText(

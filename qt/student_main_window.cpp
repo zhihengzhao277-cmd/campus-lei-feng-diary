@@ -1381,9 +1381,9 @@ void StudentMainWindow::handleNavigationChanged(
 
     if (row == 6)
     {
-        refreshDiaryPublishOptions();
+        refreshDiaryWall();
         contentStack->setCurrentWidget(
-            diaryPage);
+            diaryWallPage);
 
         return;
     }
@@ -1724,39 +1724,18 @@ void StudentMainWindow::buildBadgePage()
 void StudentMainWindow::buildDiaryPage()
 {
     diaryPage = new QWidget;
-
+    diaryPage->setObjectName("studentDiaryPage");
     diaryPage->setStyleSheet(
-        "QWidget {"
-        "background-color: #f7f7f7;"
-        "}");
+        StyleHelper::studentDiaryPages());
 
     QVBoxLayout *mainLayout =
         new QVBoxLayout(diaryPage);
-
-    mainLayout->setContentsMargins(
-        18,
-        15,
-        18,
-        15);
-
+    mainLayout->setContentsMargins(28, 24, 28, 24);
     mainLayout->setSpacing(16);
 
     QLabel *titleLabel =
         new QLabel("发布志愿日记");
-
-    QFont titleFont =
-        titleLabel->font();
-
-    titleFont.setPointSize(20);
-    titleFont.setBold(true);
-    titleLabel->setFont(titleFont);
-
-    titleLabel->setStyleSheet(
-        "QLabel {"
-        "color: #222222;"
-        "background: transparent;"
-        "border: none;"
-        "}");
+    titleLabel->setObjectName("studentDiaryPageTitle");
 
     mainLayout->addWidget(titleLabel);
 
@@ -1764,138 +1743,53 @@ void StudentMainWindow::buildDiaryPage()
         new QLabel(
             "分享你的志愿服务经历，"
             "记录每一次有意义的行动。");
-
-    tipLabel->setStyleSheet(
-        "QLabel {"
-        "color: #888888;"
-        "font-size: 14px;"
-        "background: transparent;"
-        "border: none;"
-        "}");
+    tipLabel->setObjectName("studentDiaryPageSubtitle");
 
     mainLayout->addWidget(tipLabel);
 
     QFrame *publishFrame =
         new QFrame;
-
-    publishFrame->setStyleSheet(
-        "QFrame {"
-        "background-color: white;"
-        "border: 1px solid #eeeeee;"
-        "border-radius: 18px;"
-        "}");
+    publishFrame->setObjectName("studentDiaryPublishCard");
+    publishFrame->setMaximumWidth(820);
 
     QVBoxLayout *publishLayout =
         new QVBoxLayout(publishFrame);
-
     publishLayout->setContentsMargins(24, 22, 24, 22);
     publishLayout->setSpacing(14);
 
     QLabel *publishTitle =
         new QLabel("分享我的志愿日记");
-
-    QFont publishFont =
-        publishTitle->font();
-
-    publishFont.setPointSize(14);
-    publishFont.setBold(true);
-    publishTitle->setFont(publishFont);
-
-    publishTitle->setStyleSheet(
-        "QLabel {"
-        "color: #222222;"
-        "background: transparent;"
-        "border: none;"
-        "}");
+    publishTitle->setObjectName("studentDiaryCardTitle");
 
     QLabel *recordTip =
         new QLabel("选择已审核通过的志愿记录");
-
-    recordTip->setStyleSheet(
-        "QLabel {"
-        "color: #666666;"
-        "background: transparent;"
-        "border: none;"
-        "}");
+    recordTip->setObjectName("studentDiaryFieldLabel");
 
     diaryRecordCombo =
         new QComboBox;
-
     diaryRecordCombo->setMinimumHeight(42);
-
-    diaryRecordCombo->setStyleSheet(
-        "QComboBox {"
-        "background-color: white;"
-        "border: 1px solid #dddddd;"
-        "border-radius: 10px;"
-        "padding: 6px 12px;"
-        "color: #333333;"
-        "font-size: 14px;"
-        "}"
-        "QComboBox:hover {"
-        "border: 1px solid #bbbbbb;"
-        "}"
-        "QComboBox::drop-down {"
-        "border: none;"
-        "width: 30px;"
-        "}");
+    diaryRecordCombo->setObjectName(
+        "studentDiaryRecordSelector");
 
     diaryMessageEdit =
         new QTextEdit;
-
     diaryMessageEdit->setPlaceholderText(
         "记录这次志愿服务中的故事和感受……");
-
     diaryMessageEdit->setMinimumHeight(180);
-
-    diaryMessageEdit->setStyleSheet(
-        "QTextEdit {"
-        "background-color: white;"
-        "border: 1px solid #dddddd;"
-        "border-radius: 14px;"
-        "padding: 10px;"
-        "color: #222222;"
-        "font-size: 14px;"
-        "}"
-        "QTextEdit:focus {"
-        "border: 1px solid #ff8a9d;"
-        "}");
+    diaryMessageEdit->setObjectName(
+        "studentDiaryMessageEditor");
 
     QPushButton *publishButton =
         new QPushButton("发布日记");
-
     publishButton->setMinimumSize(120, 42);
-
     publishButton->setCursor(
         Qt::PointingHandCursor);
-
-    publishButton->setStyleSheet(
-        "QPushButton {"
-        "background-color: #ff2442;"
-        "color: white;"
-        "border: none;"
-        "border-radius: 10px;"
-        "padding: 8px 22px;"
-        "font-size: 14px;"
-        "font-weight: bold;"
-        "}"
-        "QPushButton:hover {"
-        "background-color: #ed1f3b;"
-        "}"
-        "QPushButton:pressed {"
-        "background-color: #d91c35;"
-        "}");
+    publishButton->setObjectName(
+        "studentDiaryPrimaryButton");
 
     QLabel *messageLabel =
         new QLabel("日记内容");
-
-    messageLabel->setStyleSheet(
-        "QLabel {"
-        "color: #444444;"
-        "font-weight: bold;"
-        "background: transparent;"
-        "border: none;"
-        "}");
+    messageLabel->setObjectName("studentDiaryFieldLabel");
 
     publishLayout->addWidget(publishTitle);
     publishLayout->addWidget(recordTip);
@@ -1910,28 +1804,22 @@ void StudentMainWindow::buildDiaryPage()
     publishButtonLayout->addWidget(publishButton);
     publishLayout->addLayout(publishButtonLayout);
 
-    mainLayout->addWidget(publishFrame);
-    mainLayout->addStretch();
+    QHBoxLayout *cardRow = new QHBoxLayout;
+    cardRow->addStretch();
+    cardRow->addWidget(publishFrame);
+    cardRow->addStretch();
+    mainLayout->addLayout(cardRow);
 
-    QPushButton *enterWallButton =
-        new QPushButton("进入日记墙  →");
-
-    enterWallButton->setMinimumHeight(46);
-    enterWallButton->setCursor(Qt::PointingHandCursor);
-    enterWallButton->setStyleSheet(
-        "QPushButton {"
-        "background-color: white;"
-        "color: #ff2442;"
-        "border: 1px solid #ff9aaa;"
-        "border-radius: 12px;"
-        "font-size: 15px;"
-        "font-weight: bold;"
-        "}"
-        "QPushButton:hover {"
-        "background-color: #fff0f3;"
-        "}");
-
-    mainLayout->addWidget(enterWallButton);
+    QPushButton *backToWallButton =
+        new QPushButton("← 返回日记墙");
+    backToWallButton->setMinimumHeight(40);
+    backToWallButton->setCursor(Qt::PointingHandCursor);
+    backToWallButton->setObjectName(
+        "studentDiarySecondaryButton");
+    mainLayout->addWidget(
+        backToWallButton,
+        0,
+        Qt::AlignLeft);
 
     connect(
         publishButton,
@@ -1940,7 +1828,7 @@ void StudentMainWindow::buildDiaryPage()
         &StudentMainWindow::publishDiary);
 
     connect(
-        enterWallButton,
+        backToWallButton,
         &QPushButton::clicked,
         this,
         [this]()
@@ -1956,92 +1844,72 @@ void StudentMainWindow::buildDiaryPage()
 void StudentMainWindow::buildDiaryWallPage()
 {
     diaryWallPage = new QWidget;
-
+    diaryWallPage->setObjectName("studentDiaryWallPage");
     diaryWallPage->setStyleSheet(
-        "QWidget {"
-        "background-color: #f7f7f7;"
-        "}");
+        StyleHelper::studentDiaryPages());
 
     QVBoxLayout *mainLayout =
         new QVBoxLayout(diaryWallPage);
-
-    mainLayout->setContentsMargins(20, 16, 20, 16);
-    mainLayout->setSpacing(14);
+    mainLayout->setContentsMargins(28, 24, 28, 20);
+    mainLayout->setSpacing(16);
 
     QHBoxLayout *topLayout =
         new QHBoxLayout;
 
-    QPushButton *backButton =
-        new QPushButton("← 返回发布");
-
-    backButton->setMinimumSize(110, 36);
-    backButton->setCursor(Qt::PointingHandCursor);
-    backButton->setStyleSheet(
-        "QPushButton {"
-        "background-color: white;"
-        "border: 1px solid #dddddd;"
-        "border-radius: 9px;"
-        "color: #444444;"
-        "font-size: 14px;"
-        "}"
-        "QPushButton:hover {"
-        "background-color: #eeeeee;"
-        "}");
+    QVBoxLayout *headingLayout =
+        new QVBoxLayout;
+    headingLayout->setSpacing(4);
 
     QLabel *titleLabel =
         new QLabel("校园日记墙");
+    titleLabel->setObjectName("studentDiaryPageTitle");
 
-    QFont titleFont = titleLabel->font();
-    titleFont.setPointSize(20);
-    titleFont.setBold(true);
-    titleLabel->setFont(titleFont);
+    QLabel *subtitleLabel = new QLabel(
+        "记录志愿服务故事，分享校园里的温暖行动。");
+    subtitleLabel->setObjectName("studentDiaryPageSubtitle");
+    headingLayout->addWidget(titleLabel);
+    headingLayout->addWidget(subtitleLabel);
+
+    QPushButton *publishButton =
+        new QPushButton("发布日记");
+    publishButton->setMinimumHeight(40);
+    publishButton->setCursor(Qt::PointingHandCursor);
+    publishButton->setObjectName(
+        "studentDiaryPrimaryButton");
 
     QPushButton *refreshButton =
         new QPushButton("刷新");
+    refreshButton->setMinimumHeight(40);
+    refreshButton->setCursor(Qt::PointingHandCursor);
+    refreshButton->setObjectName(
+        "studentDiarySecondaryButton");
 
-    refreshButton->setMinimumSize(80, 36);
-    refreshButton->setStyleSheet(
-        "QPushButton {"
-        "background-color: white;"
-        "border: 1px solid #dddddd;"
-        "border-radius: 9px;"
-        "color: #444444;"
-        "}"
-        "QPushButton:hover {"
-        "background-color: #eeeeee;"
-        "}");
-
-    topLayout->addWidget(backButton);
-    topLayout->addStretch();
-    topLayout->addWidget(titleLabel);
-    topLayout->addStretch();
+    topLayout->addLayout(headingLayout, 1);
+    topLayout->addWidget(publishButton);
     topLayout->addWidget(refreshButton);
     mainLayout->addLayout(topLayout);
 
     diaryScrollArea = new QScrollArea;
+    diaryScrollArea->setObjectName(
+        "studentDiaryScrollArea");
     diaryScrollArea->setWidgetResizable(true);
     diaryScrollArea->setFrameShape(QFrame::NoFrame);
-    diaryScrollArea->setStyleSheet(
-        "QScrollArea {"
-        "background: transparent;"
-        "border: none;"
-        "}");
 
     diaryContainer = new QWidget;
-    diaryContainer->setStyleSheet(
-        "background: transparent;");
+    diaryContainer->setObjectName(
+        "studentDiaryFeedContainer");
 
     diaryFeedLayout =
         new QVBoxLayout(diaryContainer);
-    diaryFeedLayout->setContentsMargins(0, 5, 0, 5);
-    diaryFeedLayout->setSpacing(16);
+    diaryFeedLayout->setContentsMargins(0, 8, 0, 8);
+    diaryFeedLayout->setSpacing(14);
     diaryFeedLayout->setAlignment(Qt::AlignTop);
 
     diaryScrollArea->setWidget(diaryContainer);
     mainLayout->addWidget(diaryScrollArea);
 
     connect(
-        backButton,
+        publishButton,
         &QPushButton::clicked,
         this,
         [this]()
@@ -3270,10 +3138,20 @@ void StudentMainWindow::refreshDiaryWall()
     {
         QLabel *emptyLabel =
             new QLabel(
-                "暂时还没有志愿日记，来发布第一篇吧～");
+                "暂时还没有志愿日记。\n"
+                "分享一次志愿行动，让校园里的温暖被看见。");
 
+        emptyLabel->setObjectName(
+            "studentDiaryEmptyState");
         emptyLabel->setAlignment(Qt::AlignCenter);
-        diaryFeedLayout->addWidget(emptyLabel);
+        emptyLabel->setMinimumHeight(150);
+        emptyLabel->setMinimumWidth(560);
+        emptyLabel->setMaximumWidth(780);
+        diaryFeedLayout->addWidget(
+            emptyLabel,
+            0,
+            Qt::AlignHCenter);
+        diaryFeedLayout->addStretch();
 
         return;
     }
@@ -3288,14 +3166,10 @@ void StudentMainWindow::refreshDiaryWall()
 
         QFrame *card =
             new QFrame;
-
-        card->setFrameShape(QFrame::StyledPanel);
-        card->setStyleSheet(
-            "QFrame {"
-            "background-color: white;"
-            "border: 1px solid #eeeeee;"
-            "border-radius: 18px;"
-            "}");
+        card->setObjectName("studentDiaryPostCard");
+        card->setFrameShape(QFrame::NoFrame);
+        card->setMinimumWidth(560);
+        card->setMaximumWidth(780);
 
         QVBoxLayout *cardLayout =
             new QVBoxLayout(card);
@@ -3313,21 +3187,10 @@ void StudentMainWindow::refreshDiaryWall()
 
         QLabel *avatarLabel =
             new QLabel("志");
-
-        avatarLabel->setFixedSize(
-            38,
-            38);
-
+        avatarLabel->setObjectName("studentDiaryAvatar");
+        avatarLabel->setFixedSize(38, 38);
         avatarLabel->setAlignment(
             Qt::AlignCenter);
-
-        avatarLabel->setStyleSheet(
-            "QLabel {"
-            "background-color: #ffedf0;"
-            "color: #ff2442;"
-            "border-radius: 19px;"
-            "font-weight: bold;"
-            "}");
 
         QString authorName =
             "未知学生";
@@ -3339,28 +3202,27 @@ void StudentMainWindow::refreshDiaryWall()
                     author->getName());
         }
 
+        QVBoxLayout *authorTextLayout =
+            new QVBoxLayout;
+        authorTextLayout->setSpacing(2);
+
         QLabel *authorLabel =
-            new QLabel(
-                authorName +
-                "\n" +
-                QString::fromStdString(
-                    diary.getStudentId()));
+            new QLabel(authorName);
+        authorLabel->setObjectName(
+            "studentDiaryAuthorName");
 
-        QFont authorFont =
-            authorLabel->font();
-
-        authorFont.setBold(true);
-
-        authorLabel->setFont(
-            authorFont);
-
-        authorLabel->setMinimumWidth(130);
+        QLabel *authorIdLabel =
+            new QLabel(QString::fromStdString(
+                diary.getStudentId()));
+        authorIdLabel->setObjectName(
+            "studentDiaryAuthorId");
+        authorTextLayout->addWidget(authorLabel);
+        authorTextLayout->addWidget(authorIdLabel);
 
         authorLayout->addWidget(
             avatarLabel);
 
-        authorLayout->addWidget(
-            authorLabel);
+        authorLayout->addLayout(authorTextLayout);
 
         authorLayout->addStretch();
 
@@ -3377,14 +3239,8 @@ void StudentMainWindow::refreshDiaryWall()
                     " · " +
                     QString::number(record->getDuration(), 'f', 1) +
                     " 小时");
-
-            recordLabel->setStyleSheet(
-                "QLabel {"
-                "color: #888888;"
-                "font-size: 13px;"
-                "background: transparent;"
-                "border: none;"
-                "}");
+            recordLabel->setObjectName(
+                "studentDiaryFact");
             cardLayout->addWidget(recordLabel);
 
             QLabel *placeLabel =
@@ -3392,14 +3248,8 @@ void StudentMainWindow::refreshDiaryWall()
                     "地点：" +
                     QString::fromStdString(
                         record->getPlace()));
-
-            placeLabel->setStyleSheet(
-                "QLabel {"
-                "color: #999999;"
-                "font-size: 13px;"
-                "background: transparent;"
-                "border: none;"
-                "}");
+            placeLabel->setObjectName(
+                "studentDiaryFact");
             cardLayout->addWidget(placeLabel);
         }
 
@@ -3407,19 +3257,11 @@ void StudentMainWindow::refreshDiaryWall()
             new QLabel(
                 QString::fromStdString(
                     diary.getMessage()));
-
+        messageLabel->setObjectName(
+            "studentDiaryMessage");
         messageLabel->setWordWrap(true);
         messageLabel->setTextInteractionFlags(
             Qt::TextSelectableByMouse);
-        messageLabel->setStyleSheet(
-            "QLabel {"
-            "font-size: 16px;"
-            "color: #222222;"
-            "background: transparent;"
-            "border: none;"
-            "padding-top: 10px;"
-            "padding-bottom: 10px;"
-            "}");
         cardLayout->addWidget(messageLabel);
 
         QHBoxLayout *bottomLayout =
@@ -3432,60 +3274,29 @@ void StudentMainWindow::refreshDiaryWall()
 
         QPushButton *likeButton =
             new QPushButton;
-
+        likeButton->setObjectName(
+            "studentDiaryLikeButton");
         likeButton->setFixedSize(34, 34);
         likeButton->setCursor(Qt::PointingHandCursor);
         likeButton->setFlat(true);
+        likeButton->setAccessibleName(
+            alreadyLiked ? "已点赞" : "点赞");
+        likeButton->setProperty(
+            "liked",
+            alreadyLiked);
 
         QLabel *likeCountLabel =
             new QLabel(
                 QString::number(
                     diary.getLikeCount()));
+        likeCountLabel->setObjectName(
+            "studentDiaryLikeCount");
+        likeCountLabel->setProperty(
+            "liked",
+            alreadyLiked);
 
-        QFont likeFont =
-            likeButton->font();
-
-        likeFont.setPointSize(18);
-        likeFont.setBold(true);
-
-        likeButton->setFont(likeFont);
-
-        if (alreadyLiked)
-        {
-            likeButton->setText("♥");
-            likeButton->setStyleSheet(
-                "QPushButton {"
-                "color: #ff2442;"
-                "border: none;"
-                "background: transparent;"
-                "}");
-
-            likeCountLabel->setStyleSheet(
-                "QLabel {"
-                "color: #ff2442;"
-                "font-size: 15px;"
-                "font-weight: bold;"
-                "}");
-        }
-        else
-        {
-            likeButton->setText("♡");
-            likeButton->setStyleSheet(
-                "QPushButton {"
-                "color: #666666;"
-                "border: none;"
-                "background: transparent;"
-                "}"
-                "QPushButton:hover {"
-                "color: #ff2442;"
-                "}");
-
-            likeCountLabel->setStyleSheet(
-                "QLabel {"
-                "color: #666666;"
-                "font-size: 15px;"
-                "}");
-        }
+        likeButton->setText(
+            alreadyLiked ? "♥" : "♡");
 
         std::string diaryId =
             diary.getDiaryId();
@@ -3545,7 +3356,10 @@ void StudentMainWindow::refreshDiaryWall()
         bottomLayout->addSpacing(4);
         bottomLayout->addWidget(likeCountLabel);
         cardLayout->addLayout(bottomLayout);
-        diaryFeedLayout->addWidget(card);
+        diaryFeedLayout->addWidget(
+            card,
+            0,
+            Qt::AlignHCenter);
     }
 
     diaryFeedLayout->addStretch();

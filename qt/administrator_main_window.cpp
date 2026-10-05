@@ -2,18 +2,26 @@
 #include "style_helper.h"
 
 #include <QAbstractItemView>
+#include <QColor>
 #include <QComboBox>
 #include <QFrame>
 #include <QFont>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QPainter>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QSizePolicy>
+#include <QStyle>
+#include <QStyleOptionViewItem>
+#include <QStyledItemDelegate>
 #include <QStackedWidget>
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -25,6 +33,56 @@
 
 namespace
 {
+    class AdminReviewNoCellFocusDelegate final :
+        public QStyledItemDelegate
+    {
+    public:
+        using QStyledItemDelegate::QStyledItemDelegate;
+
+        void paint(
+            QPainter *painter,
+            const QStyleOptionViewItem &option,
+            const QModelIndex &index) const override
+        {
+            QStyleOptionViewItem itemOption(option);
+            itemOption.state &= ~QStyle::State_HasFocus;
+            QStyledItemDelegate::paint(
+                painter,
+                itemOption,
+                index);
+        }
+    };
+
+    QColor reviewStatusColor(RecordStatus status)
+    {
+        switch (status)
+        {
+        case RecordStatus::Pending:
+            return QColor("#B7791F");
+        case RecordStatus::Approved:
+            return QColor("#2F855A");
+        case RecordStatus::Rejected:
+            return QColor("#C2413A");
+        }
+
+        return QColor("#68717D");
+    }
+
+    QString reviewStatusProperty(RecordStatus status)
+    {
+        switch (status)
+        {
+        case RecordStatus::Pending:
+            return QStringLiteral("pending");
+        case RecordStatus::Approved:
+            return QStringLiteral("approved");
+        case RecordStatus::Rejected:
+            return QStringLiteral("rejected");
+        }
+
+        return QStringLiteral("default");
+    }
+
     bool containsInvalidPersistenceCharacter(
         const QString &text)
     {
@@ -52,6 +110,7 @@ AdministratorMainWindow::AdministratorMainWindow(
       reviewPage(nullptr),
       reviewStatusFilter(nullptr),
       reviewTable(nullptr),
+      reviewEmptyLabel(nullptr),
       reviewDetailFrame(nullptr),
       detailStudentLabel(nullptr),
       detailCategoryLabel(nullptr),
@@ -568,134 +627,96 @@ QString AdministratorMainWindow::statusText(
 
 void AdministratorMainWindow::buildReviewPage()
 {
-    reviewPage =
-        new QWidget;
+    reviewPage = new QWidget;
+    reviewPage->setObjectName("administratorReviewPage");
+    reviewPage->setStyleSheet(
+        StyleHelper::administratorReviewPage());
 
-    QVBoxLayout *mainLayout =
+    QVBoxLayout *pageLayout =
         new QVBoxLayout(reviewPage);
+    pageLayout->setContentsMargins(0, 0, 0, 0);
 
-    mainLayout->setContentsMargins(
-        8,
-        4,
-        8,
-        8);
+    QScrollArea *scrollArea =
+        new QScrollArea(reviewPage);
+    scrollArea->setObjectName("adminReviewScroll");
+    scrollArea->setWidgetResizable(true);
+    scrollArea->setHorizontalScrollBarPolicy(
+        Qt::ScrollBarAlwaysOff);
+    scrollArea->setFrameShape(QFrame::NoFrame);
 
+    QWidget *pageContent = new QWidget;
+    pageContent->setObjectName("adminReviewContent");
+
+    QVBoxLayout *mainLayout = new QVBoxLayout(pageContent);
+    mainLayout->setContentsMargins(22, 20, 22, 22);
     mainLayout->setSpacing(16);
 
-    QLabel *titleLabel =
-        new QLabel("志愿审核");
+    QVBoxLayout *headingLayout = new QVBoxLayout;
+    headingLayout->setSpacing(4);
 
-    QFont titleFont =
-        titleLabel->font();
+    QLabel *titleLabel = new QLabel("志愿审核");
+    titleLabel->setObjectName("adminReviewTitle");
 
-    titleFont.setPointSize(20);
-    titleFont.setBold(true);
+    QLabel *descriptionLabel = new QLabel(
+        "查看学生提交的志愿记录及审核状态。");
+    descriptionLabel->setObjectName("adminReviewSubtitle");
 
-    titleLabel->setFont(
-        titleFont);
+    headingLayout->addWidget(titleLabel);
+    headingLayout->addWidget(descriptionLabel);
+    mainLayout->addLayout(headingLayout);
 
-    titleLabel->setStyleSheet(
-        "QLabel {"
-        "color: #222222;"
-        "background: transparent;"
-        "border: none;"
-        "}");
+    QFrame *filterCard = new QFrame;
+    filterCard->setObjectName("adminReviewFilterCard");
 
-    QLabel *descriptionLabel =
-        new QLabel(
-            "查看和审核学生提交的志愿服务记录");
+    QHBoxLayout *filterLayout = new QHBoxLayout(filterCard);
+    filterLayout->setContentsMargins(16, 14, 16, 14);
+    filterLayout->setSpacing(12);
 
-    descriptionLabel->setStyleSheet(
-        "QLabel {"
-        "color: #888888;"
-        "font-size: 14px;"
-        "background: transparent;"
-        "border: none;"
-        "}");
+    QLabel *filterLabel = new QLabel("审核状态");
+    filterLabel->setObjectName("adminReviewFieldLabel");
 
-    mainLayout->addWidget(
-        titleLabel);
-
-    mainLayout->addWidget(
-        descriptionLabel);
-
-    QHBoxLayout *filterLayout =
-        new QHBoxLayout;
-
-    QLabel *filterLabel =
-        new QLabel("状态：");
-
-    reviewStatusFilter =
-        new QComboBox;
-
-    reviewStatusFilter->addItem(
-        "全部",
-        -1);
-
+    reviewStatusFilter = new QComboBox;
+    reviewStatusFilter->setObjectName(
+        "adminReviewStatusFilter");
+    reviewStatusFilter->addItem("全部", -1);
     reviewStatusFilter->addItem(
         "待审核",
-        static_cast<int>(
-            RecordStatus::Pending));
-
+        static_cast<int>(RecordStatus::Pending));
     reviewStatusFilter->addItem(
         "已通过",
-        static_cast<int>(
-            RecordStatus::Approved));
-
+        static_cast<int>(RecordStatus::Approved));
     reviewStatusFilter->addItem(
         "已驳回",
-        static_cast<int>(
-            RecordStatus::Rejected));
+        static_cast<int>(RecordStatus::Rejected));
+    reviewStatusFilter->setMinimumSize(170, 40);
 
-    reviewStatusFilter->setMinimumSize(
-        140,
-        38);
+    QPushButton *refreshButton = new QPushButton("刷新");
+    refreshButton->setObjectName("adminReviewRefreshButton");
+    refreshButton->setCursor(Qt::PointingHandCursor);
+    refreshButton->setMinimumSize(92, 40);
 
-    reviewStatusFilter->setStyleSheet(
-        "QComboBox {"
-        "background-color: white;"
-        "border: 1px solid #dddddd;"
-        "border-radius: 9px;"
-        "padding: 6px 10px;"
-        "}");
+    filterLayout->addWidget(filterLabel);
+    filterLayout->addWidget(reviewStatusFilter);
+    filterLayout->addStretch(1);
+    filterLayout->addWidget(refreshButton);
+    mainLayout->addWidget(filterCard);
 
-    QPushButton *refreshButton =
-        new QPushButton("刷新");
+    QFrame *tableCard = new QFrame;
+    tableCard->setObjectName("adminReviewTableCard");
 
-    refreshButton->setMinimumSize(
-        80,
-        38);
+    QVBoxLayout *tableCardLayout = new QVBoxLayout(tableCard);
+    tableCardLayout->setContentsMargins(16, 14, 16, 16);
+    tableCardLayout->setSpacing(10);
 
-    refreshButton->setStyleSheet(
-        "QPushButton {"
-        "background-color: white;"
-        "border: 1px solid #dddddd;"
-        "border-radius: 9px;"
-        "color: #444444;"
-        "}"
-        "QPushButton:hover {"
-        "background-color: #eeeeee;"
-        "}");
+    QLabel *tableTitle = new QLabel("审核记录");
+    tableTitle->setObjectName("adminReviewSectionTitle");
+    tableCardLayout->addWidget(tableTitle);
 
-    filterLayout->addWidget(
-        filterLabel);
-
-    filterLayout->addWidget(
-        reviewStatusFilter);
-
-    filterLayout->addStretch();
-
-    filterLayout->addWidget(
-        refreshButton);
-
-    mainLayout->addLayout(
-        filterLayout);
-
-    reviewTable =
-        new QTableWidget;
-
+    reviewTable = new QTableWidget;
+    reviewTable->setObjectName("adminReviewTable");
+    reviewTable->setItemDelegate(
+        new AdminReviewNoCellFocusDelegate(reviewTable));
     reviewTable->setColumnCount(6);
-
     reviewTable->setHorizontalHeaderLabels(
         {"记录编号",
          "学生",
@@ -703,90 +724,44 @@ void AdministratorMainWindow::buildReviewPage()
          "服务日期",
          "服务时长",
          "状态"});
-
     reviewTable->setEditTriggers(
         QAbstractItemView::NoEditTriggers);
-
     reviewTable->setSelectionBehavior(
         QAbstractItemView::SelectRows);
-
     reviewTable->setSelectionMode(
         QAbstractItemView::SingleSelection);
+    reviewTable->setAlternatingRowColors(true);
+    reviewTable->setShowGrid(false);
+    reviewTable->verticalHeader()->setVisible(false);
+    reviewTable->verticalHeader()->setDefaultSectionSize(44);
+    reviewTable->horizontalHeader()->setSectionResizeMode(
+        QHeaderView::Stretch);
+    reviewTable->horizontalHeader()->setDefaultAlignment(
+        Qt::AlignLeft | Qt::AlignVCenter);
+    reviewTable->setMinimumHeight(250);
 
-    reviewTable->verticalHeader()
-        ->setVisible(false);
+    reviewEmptyLabel = new QLabel(
+        "当前筛选条件下暂无志愿记录");
+    reviewEmptyLabel->setObjectName("adminReviewEmptyState");
+    reviewEmptyLabel->setAlignment(Qt::AlignCenter);
+    reviewEmptyLabel->setMinimumHeight(150);
+    reviewEmptyLabel->hide();
 
-    reviewTable->horizontalHeader()
-        ->setSectionResizeMode(
-            QHeaderView::Stretch);
+    tableCardLayout->addWidget(reviewTable, 1);
+    tableCardLayout->addWidget(reviewEmptyLabel);
+    mainLayout->addWidget(tableCard, 1);
 
-    reviewTable->setMinimumHeight(220);
-
-    reviewTable->setStyleSheet(
-        "QTableWidget {"
-        "background-color: white;"
-        "border: 1px solid #eeeeee;"
-        "border-radius: 12px;"
-        "gridline-color: #eeeeee;"
-        "}"
-        "QTableWidget::item {"
-        "padding: 7px;"
-        "}"
-        "QTableWidget::item:selected {"
-        "background-color: #fff0f2;"
-        "color: #222222;"
-        "}"
-        "QHeaderView::section {"
-        "background-color: #fafafa;"
-        "border: none;"
-        "border-bottom: 1px solid #eeeeee;"
-        "padding: 8px;"
-        "font-weight: bold;"
-        "}");
-
-    mainLayout->addWidget(
-        reviewTable);
-
-    reviewDetailFrame =
-        new QFrame;
-
-    reviewDetailFrame->setStyleSheet(
-        "QFrame {"
-        "background-color: white;"
-        "border: 1px solid #eeeeee;"
-        "border-radius: 16px;"
-        "}");
+    reviewDetailFrame = new QFrame;
+    reviewDetailFrame->setObjectName("adminReviewDetailCard");
 
     QVBoxLayout *detailLayout =
-        new QVBoxLayout(
-            reviewDetailFrame);
+        new QVBoxLayout(reviewDetailFrame);
+    detailLayout->setContentsMargins(18, 16, 18, 16);
+    detailLayout->setSpacing(12);
 
-    detailLayout->setContentsMargins(
-        22,
-        18,
-        22,
-        18);
-
-    detailLayout->setSpacing(10);
-
-    QLabel *detailTitle =
-        new QLabel("记录详情");
-
-    QFont detailFont =
-        detailTitle->font();
-
-    detailFont.setPointSize(15);
-    detailFont.setBold(true);
-
-    detailTitle->setFont(
-        detailFont);
-
-    detailTitle->setStyleSheet(
-        "background: transparent;"
-        "border: none;");
-
-    detailLayout->addWidget(
-        detailTitle);
+    QLabel *detailTitle = new QLabel("记录详情");
+    detailTitle->setObjectName("adminReviewSectionTitle");
+    detailLayout->addWidget(detailTitle);
 
     detailStudentLabel = new QLabel;
     detailCategoryLabel = new QLabel;
@@ -798,79 +773,59 @@ void AdministratorMainWindow::buildReviewPage()
     detailStatusLabel = new QLabel;
     detailScoreLabel = new QLabel;
 
-    detailDescriptionLabel->setWordWrap(
-        true);
+    for (QLabel *fieldLabel :
+         {detailStudentLabel,
+          detailCategoryLabel,
+          detailDateLabel,
+          detailDurationLabel,
+          detailPlaceLabel,
+          detailWitnessLabel,
+          detailDescriptionLabel,
+          detailStatusLabel,
+          detailScoreLabel})
+    {
+        fieldLabel->setObjectName("adminReviewField");
+    }
 
-    QString detailStyle =
-        "QLabel {"
-        "color: #444444;"
-        "font-size: 14px;"
-        "background: transparent;"
-        "border: none;"
-        "}";
+    detailStatusLabel->setObjectName(
+        "adminReviewDetailStatus");
+    detailDescriptionLabel->setWordWrap(true);
+    detailDescriptionLabel->setTextInteractionFlags(
+        Qt::TextSelectableByMouse);
 
-    detailStudentLabel->setStyleSheet(detailStyle);
-    detailCategoryLabel->setStyleSheet(detailStyle);
-    detailDateLabel->setStyleSheet(detailStyle);
-    detailDurationLabel->setStyleSheet(detailStyle);
-    detailPlaceLabel->setStyleSheet(detailStyle);
-    detailWitnessLabel->setStyleSheet(detailStyle);
-    detailDescriptionLabel->setStyleSheet(detailStyle);
-    detailStatusLabel->setStyleSheet(detailStyle);
-    detailScoreLabel->setStyleSheet(detailStyle);
+    QGridLayout *detailGrid = new QGridLayout;
+    detailGrid->setHorizontalSpacing(20);
+    detailGrid->setVerticalSpacing(10);
+    detailGrid->setColumnStretch(0, 1);
+    detailGrid->setColumnStretch(1, 1);
+    detailGrid->addWidget(detailStudentLabel, 0, 0);
+    detailGrid->addWidget(detailCategoryLabel, 0, 1);
+    detailGrid->addWidget(detailDateLabel, 1, 0);
+    detailGrid->addWidget(detailDurationLabel, 1, 1);
+    detailGrid->addWidget(detailPlaceLabel, 2, 0);
+    detailGrid->addWidget(detailWitnessLabel, 2, 1);
+    detailGrid->addWidget(
+        detailDescriptionLabel,
+        3,
+        0,
+        1,
+        2);
+    detailGrid->addWidget(detailStatusLabel, 4, 0);
+    detailGrid->addWidget(detailScoreLabel, 4, 1);
+    detailLayout->addLayout(detailGrid);
 
-    detailLayout->addWidget(detailStudentLabel);
-    detailLayout->addWidget(detailCategoryLabel);
-    detailLayout->addWidget(detailDateLabel);
-    detailLayout->addWidget(detailDurationLabel);
-    detailLayout->addWidget(detailPlaceLabel);
-    detailLayout->addWidget(detailWitnessLabel);
-    detailLayout->addWidget(detailDescriptionLabel);
-    detailLayout->addWidget(detailStatusLabel);
-    detailLayout->addWidget(detailScoreLabel);
+    QHBoxLayout *actionLayout = new QHBoxLayout;
+    actionLayout->addStretch(1);
 
-    QHBoxLayout *actionLayout =
-        new QHBoxLayout;
+    approveButton = new QPushButton("通过");
+    approveButton->setObjectName("adminReviewApproveButton");
+    approveButton->setCursor(Qt::PointingHandCursor);
+    approveButton->setMinimumSize(100, 40);
 
-    actionLayout->addStretch();
-
-    approveButton =
-        new QPushButton("通过");
-
-    rejectButton =
-        new QPushButton("驳回");
-
-    approveButton->setMinimumSize(
-        100,
-        38);
-
-    rejectButton->setMinimumSize(
-        100,
-        38);
-
-    approveButton->setStyleSheet(
-        "QPushButton {"
-        "background-color: #b91f35;"
-        "color: white;"
-        "border: none;"
-        "border-radius: 9px;"
-        "font-weight: bold;"
-        "}"
-        "QPushButton:hover {"
-        "background-color: #9f192d;"
-        "}");
-
-    rejectButton->setStyleSheet(
-        "QPushButton {"
-        "background-color: white;"
-        "color: #b91f35;"
-        "border: 1px solid #b91f35;"
-        "border-radius: 9px;"
-        "font-weight: bold;"
-        "}"
-        "QPushButton:hover {"
-        "background-color: #fff0f2;"
-        "}");
+    rejectButton = new QPushButton("驳回");
+    rejectButton->setObjectName("adminReviewRejectButton");
+    rejectButton->setCursor(Qt::PointingHandCursor);
+    rejectButton->setMinimumSize(100, 40);
 
     actionLayout->addWidget(approveButton);
     actionLayout->addWidget(rejectButton);
@@ -878,6 +833,9 @@ void AdministratorMainWindow::buildReviewPage()
     mainLayout->addWidget(reviewDetailFrame);
 
     reviewDetailFrame->hide();
+
+    scrollArea->setWidget(pageContent);
+    pageLayout->addWidget(scrollArea);
 
     connect(
         reviewStatusFilter,
@@ -974,12 +932,16 @@ void AdministratorMainWindow::refreshReviewPage()
 
         reviewTable->insertRow(row);
 
-        reviewTable->setItem(
-            row,
-            0,
-            new QTableWidgetItem(
-                QString::fromStdString(
-                    record.getRecordId())));
+        QString recordId = QString::fromStdString(
+            record.getRecordId());
+        QTableWidgetItem *recordIdItem =
+            new QTableWidgetItem(recordId);
+        recordIdItem->setData(
+            Qt::UserRole,
+            recordId);
+        recordIdItem->setTextAlignment(
+            Qt::AlignCenter);
+        reviewTable->setItem(row, 0, recordIdItem);
 
         reviewTable->setItem(
             row,
@@ -1000,6 +962,9 @@ void AdministratorMainWindow::refreshReviewPage()
                 QString::fromStdString(
                     record.getDate())));
 
+        reviewTable->item(row, 3)->setTextAlignment(
+            Qt::AlignCenter);
+
         reviewTable->setItem(
             row,
             4,
@@ -1009,14 +974,24 @@ void AdministratorMainWindow::refreshReviewPage()
                     'f',
                     1) +
                 " 小时"));
+        reviewTable->item(row, 4)->setTextAlignment(
+            Qt::AlignCenter);
 
-        reviewTable->setItem(
-            row,
-            5,
+        QTableWidgetItem *statusItem =
             new QTableWidgetItem(
-                statusText(
-                    record.getStatus())));
+                statusText(record.getStatus()));
+        statusItem->setTextAlignment(Qt::AlignCenter);
+        statusItem->setForeground(
+            reviewStatusColor(record.getStatus()));
+        QFont statusFont = statusItem->font();
+        statusFont.setBold(true);
+        statusItem->setFont(statusFont);
+        reviewTable->setItem(row, 5, statusItem);
     }
+
+    bool hasResults = reviewTable->rowCount() > 0;
+    reviewTable->setVisible(hasResults);
+    reviewEmptyLabel->setVisible(!hasResults);
 }
 
 void AdministratorMainWindow::applyReviewFilter()
@@ -1050,7 +1025,7 @@ void AdministratorMainWindow::showSelectedRecordDetail()
     }
 
     selectedRecordId =
-        idItem->text().toStdString();
+        idItem->data(Qt::UserRole).toString().toStdString();
 
     VolunteerRecord *record =
         dataManager->findRecord(
@@ -1119,6 +1094,13 @@ void AdministratorMainWindow::showSelectedRecordDetail()
     detailStatusLabel->setText(
         "当前状态：" +
         statusText(record->getStatus()));
+    detailStatusLabel->setProperty(
+        "reviewStatus",
+        reviewStatusProperty(record->getStatus()));
+    detailStatusLabel->style()->unpolish(
+        detailStatusLabel);
+    detailStatusLabel->style()->polish(
+        detailStatusLabel);
 
     if (record->getStatus() ==
         RecordStatus::Approved)

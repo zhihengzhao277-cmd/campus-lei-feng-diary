@@ -63,6 +63,7 @@ private:
 
     QComboBox *reviewStatusFilter;
     QTableWidget *reviewTable;
+    QLabel *reviewEmptyLabel;
 
     QFrame *reviewDetailFrame;
 

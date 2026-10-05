@@ -31,7 +31,10 @@
 #include <QMessageBox>
 #include <QScrollArea>
 #include <QFrame>
+#include <QGraphicsOpacityEffect>
 #include <QIcon>
+#include <QPixmap>
+#include <QProgressBar>
 #include <QSize>
 #include <QStringList>
 
@@ -69,6 +72,317 @@ namespace
                text.contains('\n') ||
                text.contains('\r');
     }
+
+    QLabel *createAchievementBadgeIcon(
+        const QString &categoryId,
+        int level)
+    {
+        QLabel *iconLabel = new QLabel;
+        iconLabel->setObjectName(
+            QString("achievementBadgeIcon_%1_%2")
+                .arg(categoryId)
+                .arg(level));
+        iconLabel->setAlignment(Qt::AlignCenter);
+        iconLabel->setFixedSize(88, 88);
+
+        const BadgeIconMapper::Level badgeLevel =
+            static_cast<BadgeIconMapper::Level>(level);
+        const QString resourcePath =
+            BadgeIconMapper::resourcePath(
+                categoryId.toStdString(),
+                badgeLevel);
+        iconLabel->setPixmap(
+            QIcon(resourcePath).pixmap(QSize(84, 84)));
+
+        QGraphicsOpacityEffect *opacityEffect =
+            new QGraphicsOpacityEffect(iconLabel);
+        opacityEffect->setOpacity(0.34);
+        iconLabel->setGraphicsEffect(opacityEffect);
+        return iconLabel;
+    }
+
+    QLabel *createAchievementBadgeState(
+        const QString &categoryId,
+        int level)
+    {
+        QLabel *stateLabel = new QLabel("未获得");
+        stateLabel->setObjectName(
+            QString("achievementBadgeState_%1_%2")
+                .arg(categoryId)
+                .arg(level));
+        stateLabel->setProperty("earned", false);
+        stateLabel->setAlignment(Qt::AlignCenter);
+        return stateLabel;
+    }
+
+    QFrame *createAchievementBadgeTile(
+        const QString &categoryId,
+        int level,
+        const QString &levelName)
+    {
+        QFrame *badgeTile = new QFrame;
+        badgeTile->setObjectName("achievementBadgeTile");
+        QVBoxLayout *tileLayout = new QVBoxLayout(badgeTile);
+        tileLayout->setContentsMargins(6, 8, 6, 8);
+        tileLayout->setSpacing(3);
+        tileLayout->addWidget(
+            createAchievementBadgeIcon(categoryId, level),
+            0,
+            Qt::AlignCenter);
+        QLabel *levelLabel = new QLabel(levelName);
+        levelLabel->setObjectName("achievementBadgeLevel");
+        levelLabel->setAlignment(Qt::AlignCenter);
+        tileLayout->addWidget(levelLabel);
+        tileLayout->addWidget(
+            createAchievementBadgeState(categoryId, level));
+        return badgeTile;
+    }
+
+    void addAchievementHeading(
+        QVBoxLayout *cardLayout,
+        const QString &categoryId,
+        const QString &categoryName)
+    {
+        QHBoxLayout *headingLayout = new QHBoxLayout;
+        QLabel *titleLabel = new QLabel(categoryName);
+        titleLabel->setObjectName("achievementCategoryTitle");
+        headingLayout->addWidget(titleLabel);
+        headingLayout->addStretch();
+
+        QLabel *durationLabel = new QLabel;
+        durationLabel->setObjectName(
+            "achievementDuration_" + categoryId);
+        headingLayout->addWidget(durationLabel);
+        cardLayout->addLayout(headingLayout);
+    }
+
+    void addAchievementProgress(
+        QVBoxLayout *cardLayout,
+        const QString &categoryId)
+    {
+        QLabel *currentLevelLabel = new QLabel;
+        currentLevelLabel->setObjectName(
+            "achievementCurrentLevel_" + categoryId);
+        cardLayout->addWidget(currentLevelLabel);
+        QHBoxLayout *progressLayout = new QHBoxLayout;
+        QProgressBar *progressBar = new QProgressBar;
+        progressBar->setObjectName(
+            "achievementProgress_" + categoryId);
+        progressBar->setRange(0, 100);
+        progressBar->setTextVisible(false);
+        progressLayout->addWidget(progressBar, 1);
+
+        QLabel *nextGoalLabel = new QLabel;
+        nextGoalLabel->setObjectName(
+            "achievementNextGoal_" + categoryId);
+        progressLayout->addWidget(nextGoalLabel);
+        cardLayout->addLayout(progressLayout);
+    }
+
+    void addAchievementBadgeRow(
+        QVBoxLayout *cardLayout,
+        const QString &categoryId)
+    {
+        QHBoxLayout *badgeLayout = new QHBoxLayout;
+        badgeLayout->setSpacing(10);
+        const QStringList levelNames = {
+            "铜级", "银级", "金级"};
+        for (int level = 1; level <= levelNames.size(); ++level)
+        {
+            badgeLayout->addWidget(
+                createAchievementBadgeTile(
+                    categoryId,
+                    level,
+                levelNames.at(level - 1)));
+        }
+        cardLayout->addLayout(badgeLayout);
+    }
+
+    QFrame *createAchievementCategoryCard(
+        const QString &categoryId,
+        const QString &categoryName)
+    {
+        QFrame *categoryCard = new QFrame;
+        categoryCard->setObjectName("achievementCategoryCard");
+        QVBoxLayout *cardLayout = new QVBoxLayout(categoryCard);
+        cardLayout->setContentsMargins(18, 16, 18, 16);
+        cardLayout->setSpacing(10);
+        addAchievementHeading(cardLayout, categoryId, categoryName);
+        addAchievementProgress(cardLayout, categoryId);
+        addAchievementBadgeRow(cardLayout, categoryId);
+        return categoryCard;
+    }
+
+    QHBoxLayout *createAchievementHeader(
+        QPushButton **refreshButton)
+    {
+        QHBoxLayout *headerLayout = new QHBoxLayout;
+        QVBoxLayout *headingLayout = new QVBoxLayout;
+        QLabel *titleLabel = new QLabel("我的徽章");
+        titleLabel->setObjectName("achievementTitle");
+        headingLayout->addWidget(titleLabel);
+        QLabel *subtitleLabel = new QLabel(
+            "根据已审核通过的志愿服务时长解锁徽章。");
+        subtitleLabel->setObjectName("achievementSubtitle");
+        headingLayout->addWidget(subtitleLabel);
+        headerLayout->addLayout(headingLayout);
+        headerLayout->addStretch();
+        *refreshButton = new QPushButton("刷新徽章");
+        (*refreshButton)->setObjectName("achievementRefreshButton");
+        headerLayout->addWidget(*refreshButton);
+        return headerLayout;
+    }
+
+    void addAchievementCategoryCards(QVBoxLayout *contentLayout)
+    {
+        const QStringList categoryIds = {"C01", "C02", "C03"};
+        const QStringList categoryNames = {
+            "劳动先锋", "环保卫士", "互助之星"};
+        for (int index = 0; index < 3; ++index)
+        {
+            contentLayout->addWidget(
+                createAchievementCategoryCard(
+                    categoryIds.at(index),
+                    categoryNames.at(index)));
+        }
+        contentLayout->addStretch();
+    }
+
+    QWidget *createAchievementContent(
+        QPushButton **refreshButton)
+    {
+        QWidget *contentWidget = new QWidget;
+        contentWidget->setObjectName("achievementContent");
+        QVBoxLayout *contentLayout =
+            new QVBoxLayout(contentWidget);
+        contentLayout->setContentsMargins(24, 22, 24, 22);
+        contentLayout->setSpacing(16);
+        contentLayout->addLayout(
+            createAchievementHeader(refreshButton));
+        addAchievementCategoryCards(contentLayout);
+        return contentWidget;
+    }
+
+    QScrollArea *createAchievementScrollArea(
+        QPushButton **refreshButton)
+    {
+        QScrollArea *scrollArea = new QScrollArea;
+        scrollArea->setObjectName("achievementScrollArea");
+        scrollArea->setWidgetResizable(true);
+        scrollArea->setFrameShape(QFrame::NoFrame);
+        scrollArea->setWidget(
+            createAchievementContent(refreshButton));
+        return scrollArea;
+    }
+
+    void updateAchievementSummary(
+        QWidget *page,
+        const QString &categoryKey,
+        double duration,
+        int earnedLevel,
+        const QString &currentBadge)
+    {
+        QLabel *durationLabel = page->findChild<QLabel *>(
+            "achievementDuration_" + categoryKey);
+        QLabel *currentLabel = page->findChild<QLabel *>(
+            "achievementCurrentLevel_" + categoryKey);
+        durationLabel->setText(
+            QString("累计已通过服务时长：%1 小时")
+                .arg(duration, 0, 'f', 1));
+        currentLabel->setText(
+            earnedLevel == 0
+                ? "当前：暂无徽章"
+                : "当前：" + currentBadge);
+    }
+
+    void setNextAchievementGoal(
+        QProgressBar *progressBar,
+        QLabel *nextGoalLabel,
+        double duration,
+        double target,
+        const QString &levelName)
+    {
+        const double remaining = target - duration;
+        const double progressDuration =
+            duration < target ? duration : target;
+        progressBar->setValue(
+            static_cast<int>(progressDuration / target * 100.0));
+        nextGoalLabel->setText(
+            QString("距离%1还需 %2 小时")
+                .arg(levelName)
+                .arg(QString::number(remaining, 'f', 1)));
+    }
+
+    void updateAchievementProgress(
+        QWidget *page,
+        const QString &categoryKey,
+        double duration,
+        int earnedLevel,
+        const double *thresholds,
+        const QString *levelNames)
+    {
+        QProgressBar *progressBar = page->findChild<QProgressBar *>(
+            "achievementProgress_" + categoryKey);
+        QLabel *nextGoalLabel = page->findChild<QLabel *>(
+            "achievementNextGoal_" + categoryKey);
+        if (earnedLevel >= 3)
+        {
+            progressBar->setValue(100);
+            nextGoalLabel->setText("已达到最高等级");
+            return;
+        }
+        setNextAchievementGoal(
+            progressBar,
+            nextGoalLabel,
+            duration,
+            thresholds[earnedLevel],
+            levelNames[earnedLevel]);
+    }
+
+    void updateAchievementBadgeTile(
+        QWidget *page,
+        const QString &categoryKey,
+        int level,
+        bool earned)
+    {
+        const QString suffix =
+            QString("%1_%2").arg(categoryKey).arg(level);
+        QLabel *iconLabel = page->findChild<QLabel *>(
+            "achievementBadgeIcon_" + suffix);
+        QLabel *stateLabel = page->findChild<QLabel *>(
+            "achievementBadgeState_" + suffix);
+        stateLabel->setText(earned ? "已获得" : "未获得");
+        stateLabel->setProperty("earned", earned);
+        stateLabel->style()->unpolish(stateLabel);
+        stateLabel->style()->polish(stateLabel);
+
+        QGraphicsOpacityEffect *opacityEffect =
+            qobject_cast<QGraphicsOpacityEffect *>(
+                iconLabel->graphicsEffect());
+        opacityEffect->setOpacity(earned ? 1.0 : 0.34);
+    }
+
+    void updateAchievementCategory(
+        QWidget *page,
+        const QString &categoryKey,
+        double duration,
+        int earnedLevel,
+        const QString &currentBadge,
+        const double *thresholds,
+        const QString *levelNames)
+    {
+        updateAchievementSummary(
+            page, categoryKey, duration, earnedLevel, currentBadge);
+        updateAchievementProgress(
+            page, categoryKey, duration, earnedLevel,
+            thresholds, levelNames);
+        for (int level = 1; level <= 3; ++level)
+        {
+            updateAchievementBadgeTile(
+                page, categoryKey, level, level <= earnedLevel);
+        }
+    }
+
 }
 
 StudentMainWindow::StudentMainWindow(
@@ -110,12 +424,6 @@ StudentMainWindow::StudentMainWindow(
       rankingPage(nullptr),
       rankingTable(nullptr),
       badgePage(nullptr),
-      laborBadgeLabel(nullptr),
-      environmentBadgeLabel(nullptr),
-      mutualAidBadgeLabel(nullptr),
-      laborProgressLabel(nullptr),
-      environmentProgressLabel(nullptr),
-      mutualAidProgressLabel(nullptr),
       diaryPage(nullptr),
       diaryWallPage(nullptr),
       diaryRecordCombo(nullptr),
@@ -1171,75 +1479,14 @@ void StudentMainWindow::buildRankingPage()
 void StudentMainWindow::buildBadgePage()
 {
     badgePage = new QWidget;
-
-    QVBoxLayout *mainLayout =
-        new QVBoxLayout(badgePage);
-
-    QHBoxLayout *titleLayout =
-        new QHBoxLayout;
-
-    QLabel *titleLabel =
-        new QLabel("我的专项徽章");
-
-    titleLabel->setStyleSheet(
-        StyleHelper::title());
-
-    QPushButton *refreshButton =
-        new QPushButton("刷新徽章");
-
-    titleLayout->addWidget(titleLabel);
-    titleLayout->addStretch();
-    titleLayout->addWidget(refreshButton);
-
-    mainLayout->addLayout(titleLayout);
-
-    QLabel *ruleLabel =
-        new QLabel(
-            "徽章根据已审核通过的志愿服务时长动态计算：\n"
-            "10 小时：铜级  30 小时：银级  60 小时：金级");
-
-    mainLayout->addWidget(ruleLabel);
-
-    QLabel *laborTitle =
-        new QLabel("劳动服务");
-
-    laborBadgeLabel =
-        new QLabel("暂无徽章");
-
-    laborProgressLabel =
-        new QLabel;
-
-    mainLayout->addWidget(laborTitle);
-    mainLayout->addWidget(laborBadgeLabel);
-    mainLayout->addWidget(laborProgressLabel);
-
-    QLabel *environmentTitle =
-        new QLabel("环保服务");
-
-    environmentBadgeLabel =
-        new QLabel("暂无徽章");
-
-    environmentProgressLabel =
-        new QLabel;
-
-    mainLayout->addWidget(environmentTitle);
-    mainLayout->addWidget(environmentBadgeLabel);
-    mainLayout->addWidget(environmentProgressLabel);
-
-    QLabel *mutualAidTitle =
-        new QLabel("互助服务");
-
-    mutualAidBadgeLabel =
-        new QLabel("暂无徽章");
-
-    mutualAidProgressLabel =
-        new QLabel;
-
-    mainLayout->addWidget(mutualAidTitle);
-    mainLayout->addWidget(mutualAidBadgeLabel);
-    mainLayout->addWidget(mutualAidProgressLabel);
-
-    mainLayout->addStretch();
+    badgePage->setObjectName("studentAchievementPage");
+    badgePage->setStyleSheet(
+        StyleHelper::studentAchievementPage());
+    QPushButton *refreshButton = nullptr;
+    QVBoxLayout *pageLayout = new QVBoxLayout(badgePage);
+    pageLayout->setContentsMargins(0, 0, 0, 0);
+    pageLayout->addWidget(
+        createAchievementScrollArea(&refreshButton));
 
     connect(
         refreshButton,
@@ -3406,65 +3653,41 @@ QString StudentMainWindow::badgeText(
 
 void StudentMainWindow::refreshBadgePage()
 {
-    if (dataManager == nullptr)
+    if (dataManager == nullptr || badgePage == nullptr)
     {
         return;
     }
 
-    double laborDuration =
-        dataManager
-            ->calculateStudentDurationByCategory(
-                accountId,
-                "C01");
+    const char *categoryIds[] = {"C01", "C02", "C03"};
+    const double thresholds[] = {10.0, 30.0, 60.0};
+    const QString levelNames[] = {"铜级", "银级", "金级"};
+    for (const char *categoryId : categoryIds)
+    {
+        refreshAchievementCategory(
+            categoryId, thresholds, levelNames);
+    }
+}
 
-    double environmentDuration =
-        dataManager
-            ->calculateStudentDurationByCategory(
-                accountId,
-                "C02");
-
-    double mutualAidDuration =
-        dataManager
-            ->calculateStudentDurationByCategory(
-                accountId,
-                "C03");
-
-    laborBadgeLabel->setText(
-        badgeText(
-            "C01",
-            laborDuration));
-
-    environmentBadgeLabel->setText(
-        badgeText(
-            "C02",
-            environmentDuration));
-
-    mutualAidBadgeLabel->setText(
-        badgeText(
-            "C03",
-            mutualAidDuration));
-
-    laborProgressLabel->setText(
-        "累计已通过服务时长：" +
-        QString::number(
-            laborDuration,
-            'f',
-            1) +
-        " 小时");
-
-    environmentProgressLabel->setText(
-        "累计已通过服务时长：" +
-        QString::number(
-            environmentDuration,
-            'f',
-            1) +
-        " 小时");
-
-    mutualAidProgressLabel->setText(
-        "累计已通过服务时长：" +
-        QString::number(
-            mutualAidDuration,
-            'f',
-            1) +
-        " 小时");
+void StudentMainWindow::refreshAchievementCategory(
+    const char *categoryId,
+    const double *thresholds,
+    const QString *levelNames)
+{
+    const std::string category(categoryId);
+    const QString categoryKey = QString::fromLatin1(categoryId);
+    const double duration =
+        dataManager->calculateStudentDurationByCategory(
+            accountId,
+            category);
+    int earnedLevel = 0;
+    const QString currentBadge =
+        badgeText(category, duration, &earnedLevel);
+    updateAchievementCategory(
+        badgePage,
+        categoryKey,
+        duration,
+        earnedLevel,
+        currentBadge,
+        thresholds,
+        levelNames);
 }

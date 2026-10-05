@@ -92,16 +92,14 @@ private:
     QWidget *rankingPage;
     QTableWidget *rankingTable;
     QWidget *badgePage;
-    QLabel *laborBadgeLabel;
-    QLabel *environmentBadgeLabel;
-    QLabel *mutualAidBadgeLabel;
-    QLabel *laborProgressLabel;
-    QLabel *environmentProgressLabel;
-    QLabel *mutualAidProgressLabel;
     void buildScorePage();
     void buildSubmitPage();
     void buildRankingPage();
     void buildBadgePage();
+    void refreshAchievementCategory(
+        const char *categoryId,
+        const double *thresholds,
+        const QString *levelNames);
     QString badgeText(
         const std::string &categoryId,
         double duration,

@@ -22,6 +22,8 @@ public:
 
     static QString administratorReviewPage();
 
+    static QString administratorRemainingPages();
+
     static QString studentRecordsPage();
 
     static QString studentRecordsCalendarPopup();

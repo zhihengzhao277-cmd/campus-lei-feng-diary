@@ -1928,77 +1928,46 @@ void StudentMainWindow::buildDiaryWallPage()
 void StudentMainWindow::buildProfilePage()
 {
     profilePage = new QWidget;
-
+    profilePage->setObjectName("studentProfilePage");
     profilePage->setStyleSheet(
-        StyleHelper::pageBackground());
+        StyleHelper::profilePages());
 
     QVBoxLayout *mainLayout =
         new QVBoxLayout(profilePage);
-
     mainLayout->setContentsMargins(28, 24, 28, 24);
-    mainLayout->setSpacing(18);
+    mainLayout->setSpacing(16);
 
     QLabel *titleLabel =
         new QLabel("个人信息");
-
-    titleLabel->setStyleSheet(
-        StyleHelper::title());
-
-    QFont titleFont = titleLabel->font();
-    titleFont.setPointSize(20);
-    titleFont.setBold(true);
-    titleLabel->setFont(titleFont);
+    titleLabel->setObjectName("profilePageTitle");
 
     QLabel *tipLabel =
-        new QLabel("查看个人基本资料和账号信息");
-
-    tipLabel->setStyleSheet(
-        StyleHelper::subtitle());
+        new QLabel("查看学生基本资料与账号安全设置");
+    tipLabel->setObjectName("profilePageSubtitle");
 
     mainLayout->addWidget(titleLabel);
     mainLayout->addWidget(tipLabel);
 
-    QFrame *profileCard = new QFrame;
-    profileCard->setStyleSheet(
-        StyleHelper::card());
+    QFrame *identityCard = new QFrame;
+    identityCard->setObjectName("profileIdentityCard");
 
     QVBoxLayout *cardLayout =
-        new QVBoxLayout(profileCard);
-
-    cardLayout->setContentsMargins(26, 24, 26, 24);
-    cardLayout->setSpacing(18);
+        new QVBoxLayout(identityCard);
+    cardLayout->setContentsMargins(24, 20, 24, 20);
+    cardLayout->setSpacing(16);
 
     QHBoxLayout *userLayout = new QHBoxLayout;
-
     QLabel *avatarLabel = new QLabel("志");
-    avatarLabel->setFixedSize(68, 68);
+    avatarLabel->setObjectName("profileIdentityAvatar");
+    avatarLabel->setFixedSize(64, 64);
     avatarLabel->setAlignment(Qt::AlignCenter);
-    avatarLabel->setStyleSheet(
-        "QLabel {"
-        "background-color: #ffedf0;"
-        "color: #ff2442;"
-        "border: none;"
-        "border-radius: 34px;"
-        "font-size: 26px;"
-        "font-weight: bold;"
-        "}");
 
     QVBoxLayout *nameLayout = new QVBoxLayout;
-
     profileNameLabel = new QLabel;
-    QFont nameFont = profileNameLabel->font();
-    nameFont.setPointSize(17);
-    nameFont.setBold(true);
-    profileNameLabel->setFont(nameFont);
+    profileNameLabel->setObjectName("profileIdentityName");
 
     profileAccountLabel = new QLabel;
-    profileAccountLabel->setStyleSheet(
-        "QLabel {"
-        "color: #888888;"
-        "font-size: 13px;"
-        "background: transparent;"
-        "border: none;"
-        "}");
+    profileAccountLabel->setObjectName("profileIdentityAccount");
 
     nameLayout->addWidget(profileNameLabel);
     nameLayout->addWidget(profileAccountLabel);
@@ -2007,99 +1976,82 @@ void StudentMainWindow::buildProfilePage()
     userLayout->addLayout(nameLayout);
     userLayout->addStretch();
     cardLayout->addLayout(userLayout);
+    mainLayout->addWidget(identityCard);
 
-    QFrame *line = new QFrame;
-    line->setFrameShape(QFrame::HLine);
-    line->setStyleSheet("color: #eeeeee;");
-    cardLayout->addWidget(line);
+    QFrame *profileCard = new QFrame;
+    profileCard->setObjectName("profileInfoCard");
 
-    QFormLayout *infoLayout = new QFormLayout;
+    QVBoxLayout *infoCardLayout =
+        new QVBoxLayout(profileCard);
+    infoCardLayout->setContentsMargins(24, 20, 24, 22);
+    infoCardLayout->setSpacing(16);
+
+    QLabel *infoTitle = new QLabel("基本信息");
+    infoTitle->setObjectName("profileSectionTitle");
+    infoCardLayout->addWidget(infoTitle);
+
+    QFormLayout *infoLayout =
+        new QFormLayout;
+    infoLayout->setLabelAlignment(
+        Qt::AlignLeft | Qt::AlignVCenter);
     infoLayout->setHorizontalSpacing(30);
-    infoLayout->setVerticalSpacing(18);
+    infoLayout->setVerticalSpacing(14);
 
-    QLabel *accountTitle = new QLabel("学生账号");
+    QLabel *accountTitle =
+        new QLabel("学号 / 账号 ID");
     QLabel *nameTitle = new QLabel("姓名");
     QLabel *classTitle = new QLabel("班级");
     QLabel *majorTitle = new QLabel("专业");
-
-    QString titleStyle =
-        "QLabel {"
-        "color: #888888;"
-        "font-size: 14px;"
-        "background: transparent;"
-        "border: none;"
-        "}";
-
-    accountTitle->setStyleSheet(titleStyle);
-    nameTitle->setStyleSheet(titleStyle);
-    classTitle->setStyleSheet(titleStyle);
-    majorTitle->setStyleSheet(titleStyle);
+    accountTitle->setObjectName("profileFieldLabel");
+    nameTitle->setObjectName("profileFieldLabel");
+    classTitle->setObjectName("profileFieldLabel");
+    majorTitle->setObjectName("profileFieldLabel");
 
     QLabel *accountDetailLabel = new QLabel;
     QLabel *nameDetailLabel = new QLabel;
     profileClassLabel = new QLabel;
     profileMajorLabel = new QLabel;
-
-    QString valueStyle =
-        "QLabel {"
-        "color: #222222;"
-        "font-size: 15px;"
-        "font-weight: bold;"
-        "background: transparent;"
-        "border: none;"
-        "}";
-
-    accountDetailLabel->setStyleSheet(valueStyle);
-    nameDetailLabel->setStyleSheet(valueStyle);
-    profileClassLabel->setStyleSheet(valueStyle);
-    profileMajorLabel->setStyleSheet(valueStyle);
-
     accountDetailLabel->setObjectName(
         "profileAccountDetail");
     nameDetailLabel->setObjectName(
         "profileNameDetail");
+    profileClassLabel->setObjectName("profileFieldValue");
+    profileMajorLabel->setObjectName("profileFieldValue");
 
     infoLayout->addRow(accountTitle, accountDetailLabel);
     infoLayout->addRow(nameTitle, nameDetailLabel);
     infoLayout->addRow(classTitle, profileClassLabel);
     infoLayout->addRow(majorTitle, profileMajorLabel);
-    cardLayout->addLayout(infoLayout);
+    infoCardLayout->addLayout(infoLayout);
     mainLayout->addWidget(profileCard);
 
     QFrame *securityCard = new QFrame;
-    securityCard->setStyleSheet(
-        StyleHelper::card());
+    securityCard->setObjectName("profileSecurityCard");
 
     QHBoxLayout *securityLayout =
         new QHBoxLayout(securityCard);
-    securityLayout->setContentsMargins(24, 20, 24, 20);
+    securityLayout->setContentsMargins(24, 18, 24, 18);
+    securityLayout->setSpacing(16);
 
     QVBoxLayout *securityTextLayout = new QVBoxLayout;
+    securityTextLayout->setSpacing(5);
     QLabel *securityTitle = new QLabel("账号安全");
-    QFont securityFont = securityTitle->font();
-    securityFont.setBold(true);
-    securityFont.setPointSize(14);
-    securityTitle->setFont(securityFont);
+    securityTitle->setObjectName("profileSectionTitle");
 
     QLabel *securityDescription =
         new QLabel("建议定期修改登录密码，保护账号安全。");
-    securityDescription->setStyleSheet(
-        "QLabel {"
-        "color: #888888;"
-        "font-size: 13px;"
-        "background: transparent;"
-        "border: none;"
-        "}");
+    securityDescription->setObjectName(
+        "profileSecurityDescription");
 
     securityTextLayout->addWidget(securityTitle);
     securityTextLayout->addWidget(securityDescription);
 
     QPushButton *passwordButton =
         new QPushButton("修改密码");
+    passwordButton->setObjectName(
+        "profilePasswordButton");
     passwordButton->setMinimumSize(110, 40);
     passwordButton->setCursor(Qt::PointingHandCursor);
-    passwordButton->setStyleSheet(
-        StyleHelper::primaryButton());
 
     securityLayout->addLayout(securityTextLayout);
     securityLayout->addStretch();
@@ -3499,7 +3451,7 @@ void StudentMainWindow::refreshProfilePage()
 
     profileNameLabel->setText(studentName);
     profileAccountLabel->setText(
-        "账号：" + studentAccount);
+        "学号：" + studentAccount);
     profileClassLabel->setText(
         QString::fromStdString(
             student->getClassName()));

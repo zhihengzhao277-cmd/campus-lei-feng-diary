@@ -16,6 +16,8 @@ public:
 
     static QString studentDiaryPages();
 
+    static QString profilePages();
+
     static QString administratorDashboard();
 
     static QString administratorReviewPage();

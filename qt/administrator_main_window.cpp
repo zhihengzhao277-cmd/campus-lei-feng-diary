@@ -2326,144 +2326,155 @@ void AdministratorMainWindow::buildProfilePage()
 {
     profilePage =
         new QWidget;
+    profilePage->setObjectName(
+        "administratorProfilePage");
+    profilePage->setStyleSheet(
+        StyleHelper::profilePages());
 
     QVBoxLayout *mainLayout =
         new QVBoxLayout(profilePage);
-
     mainLayout->setContentsMargins(
         28,
-        22,
+        24,
         28,
-        22);
-
-    mainLayout->setSpacing(18);
+        24);
+    mainLayout->setSpacing(16);
 
     QLabel *titleLabel =
         new QLabel("个人信息");
-
-    QFont titleFont =
-        titleLabel->font();
-
-    titleFont.setPointSize(20);
-    titleFont.setBold(true);
-    titleLabel->setFont(titleFont);
+    titleLabel->setObjectName(
+        "profilePageTitle");
 
     QLabel *description =
         new QLabel(
-            "查看管理员账号信息和账号安全设置");
-
-    description->setStyleSheet(
-        "color:#888888;"
-        "background:transparent;");
+            "查看管理员身份资料与账号安全设置");
+    description->setObjectName(
+        "profilePageSubtitle");
 
     mainLayout->addWidget(titleLabel);
     mainLayout->addWidget(description);
 
-    QFrame *infoCard = new QFrame;
+    QFrame *identityCard = new QFrame;
+    identityCard->setObjectName(
+        "profileIdentityCard");
 
-    infoCard->setStyleSheet(
-        "QFrame{"
-        "background:white;"
-        "border:1px solid #eeeeee;"
-        "border-radius:18px;"
-        "}");
-
-    QVBoxLayout *cardLayout =
-        new QVBoxLayout(infoCard);
-
-    cardLayout->setContentsMargins(
-        25,
-        25,
-        25,
-        25);
-
-    QHBoxLayout *header =
-        new QHBoxLayout;
+    QHBoxLayout *identityLayout =
+        new QHBoxLayout(identityCard);
+    identityLayout->setContentsMargins(
+        24,
+        20,
+        24,
+        20);
+    identityLayout->setSpacing(14);
 
     QLabel *avatar = new QLabel("管");
-
-    avatar->setFixedSize(70, 70);
+    avatar->setObjectName(
+        "profileIdentityAvatar");
+    avatar->setFixedSize(64, 64);
     avatar->setAlignment(Qt::AlignCenter);
-    avatar->setStyleSheet(
-        "QLabel{"
-        "background:#fff0f2;"
-        "color:#b91f35;"
-        "border-radius:35px;"
-        "font-size:28px;"
-        "font-weight:bold;"
-        "}");
 
     QVBoxLayout *nameLayout =
         new QVBoxLayout;
-
+    nameLayout->setSpacing(5);
     profileNameLabel = new QLabel;
-
-    QFont nameFont =
-        profileNameLabel->font();
-
-    nameFont.setPointSize(18);
-    nameFont.setBold(true);
-    profileNameLabel->setFont(nameFont);
+    profileNameLabel->setObjectName(
+        "profileIdentityName");
 
     profileAccountLabel = new QLabel;
-
-    profileAccountLabel->setStyleSheet(
-        "color:#888888;");
+    profileAccountLabel->setObjectName(
+        "profileIdentityAccount");
 
     nameLayout->addWidget(profileNameLabel);
     nameLayout->addWidget(profileAccountLabel);
 
-    header->addWidget(avatar);
-    header->addSpacing(15);
-    header->addLayout(nameLayout);
-    header->addStretch();
-    cardLayout->addLayout(header);
+    identityLayout->addWidget(avatar);
+    identityLayout->addLayout(nameLayout);
+    identityLayout->addStretch();
+    mainLayout->addWidget(identityCard);
 
-    QFrame *line = new QFrame;
-    line->setFrameShape(QFrame::HLine);
-    cardLayout->addWidget(line);
+    QFrame *infoCard = new QFrame;
+    infoCard->setObjectName(
+        "profileInfoCard");
+    QVBoxLayout *infoCardLayout =
+        new QVBoxLayout(infoCard);
+    infoCardLayout->setContentsMargins(
+        24,
+        20,
+        24,
+        22);
+    infoCardLayout->setSpacing(16);
 
-    QLabel *info = new QLabel;
-    info->setObjectName("adminInfoLabel");
-    info->setStyleSheet(
-        "color:#444444;"
-        "font-size:15px;");
-    cardLayout->addWidget(info);
+    QLabel *infoTitle =
+        new QLabel("基本信息");
+    infoTitle->setObjectName(
+        "profileSectionTitle");
+    infoCardLayout->addWidget(infoTitle);
+
+    QFormLayout *infoLayout =
+        new QFormLayout;
+    infoLayout->setLabelAlignment(
+        Qt::AlignLeft | Qt::AlignVCenter);
+    infoLayout->setHorizontalSpacing(30);
+    infoLayout->setVerticalSpacing(14);
+
+    QLabel *accountTitle =
+        new QLabel("管理员账号");
+    accountTitle->setObjectName(
+        "profileFieldLabel");
+    QLabel *nameTitle =
+        new QLabel("姓名");
+    nameTitle->setObjectName(
+        "profileFieldLabel");
+
+    QLabel *accountValue = new QLabel;
+    accountValue->setObjectName(
+        "adminAccountDetail");
+    QLabel *nameValue = new QLabel;
+    nameValue->setObjectName(
+        "adminNameDetail");
+
+    infoLayout->addRow(accountTitle, accountValue);
+    infoLayout->addRow(nameTitle, nameValue);
+    infoCardLayout->addLayout(infoLayout);
     mainLayout->addWidget(infoCard);
 
     QFrame *securityCard = new QFrame;
-
-    securityCard->setStyleSheet(
-        "QFrame{"
-        "background:white;"
-        "border:1px solid #eeeeee;"
-        "border-radius:18px;"
-        "}");
-
+    securityCard->setObjectName(
+        "profileSecurityCard");
     QHBoxLayout *securityLayout =
         new QHBoxLayout(securityCard);
+    securityLayout->setContentsMargins(
+        24,
+        18,
+        24,
+        18);
+    securityLayout->setSpacing(16);
 
-    QLabel *securityText =
+    QVBoxLayout *securityTextLayout =
+        new QVBoxLayout;
+    securityTextLayout->setSpacing(5);
+    QLabel *securityTitle =
+        new QLabel("账号安全");
+    securityTitle->setObjectName(
+        "profileSectionTitle");
+    QLabel *securityDescription =
         new QLabel(
-            "账号安全\n建议定期修改登录密码");
-
-    securityText->setStyleSheet(
-        "color:#555555;");
+            "建议定期修改登录密码，保护账号安全。");
+    securityDescription->setObjectName(
+        "profileSecurityDescription");
+    securityTextLayout->addWidget(securityTitle);
+    securityTextLayout->addWidget(
+        securityDescription);
 
     QPushButton *passwordButton =
         new QPushButton("修改密码");
-
+    passwordButton->setObjectName(
+        "profilePasswordButton");
     passwordButton->setMinimumSize(110, 40);
-    passwordButton->setStyleSheet(
-        "QPushButton{"
-        "background:#b91f35;"
-        "color:white;"
-        "border:none;"
-        "border-radius:10px;"
-        "font-weight:bold;"
-        "}");
-
-    securityLayout->addWidget(securityText);
+    passwordButton->setCursor(
+        Qt::PointingHandCursor);
+    securityLayout->addLayout(
+        securityTextLayout);
     securityLayout->addStretch();
     securityLayout->addWidget(passwordButton);
     mainLayout->addWidget(securityCard);
@@ -2498,21 +2509,26 @@ void AdministratorMainWindow::refreshProfilePage()
             administrator->getName()));
 
     profileAccountLabel->setText(
-        "账号：" +
+        "管理员账号：" +
         QString::fromStdString(
             administrator->getAccountId()));
 
-    QLabel *info =
+    QLabel *accountValue =
         profilePage->findChild<QLabel *>(
-            "adminInfoLabel");
-
-    if (info != nullptr)
+            "adminAccountDetail");
+    if (accountValue != nullptr)
     {
-        info->setText(
-            "管理员账号：" +
+        accountValue->setText(
             QString::fromStdString(
-                administrator->getAccountId()) +
-            "\n\n姓名：" +
+                administrator->getAccountId()));
+    }
+
+    QLabel *nameValue =
+        profilePage->findChild<QLabel *>(
+            "adminNameDetail");
+    if (nameValue != nullptr)
+    {
+        nameValue->setText(
             QString::fromStdString(
                 administrator->getName()));
     }

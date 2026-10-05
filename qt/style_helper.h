@@ -12,6 +12,8 @@ public:
 
     static QString studentAchievementPage();
 
+    static QString studentRankingPage();
+
     static QString administratorDashboard();
 
     static QString administratorReviewPage();

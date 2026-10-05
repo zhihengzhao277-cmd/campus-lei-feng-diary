@@ -18,6 +18,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QList>
 #include <QPainter>
 #include <QPushButton>
 #include <QStyle>
@@ -45,6 +46,10 @@
 
 namespace
 {
+    void addRankingTopStudentFields(QVBoxLayout *cardLayout);
+    void configureRankingTable(QTableWidget *table);
+    void addRankingTopCardContainer(QVBoxLayout *sectionLayout);
+
     class RecordsNoCellFocusDelegate final :
         public QStyledItemDelegate
     {
@@ -381,6 +386,270 @@ namespace
             updateAchievementBadgeTile(
                 page, categoryKey, level, level <= earnedLevel);
         }
+    }
+
+    QPushButton *createRankingHeader(QVBoxLayout *contentLayout)
+    {
+        QHBoxLayout *headerLayout = new QHBoxLayout;
+        QVBoxLayout *titleLayout = new QVBoxLayout;
+        QLabel *title = new QLabel("排行榜");
+        title->setObjectName("rankingTitle");
+        titleLayout->addWidget(title);
+        QLabel *subtitle = new QLabel("按当前累计积分展示志愿服务排名。");
+        subtitle->setObjectName("rankingSubtitle");
+        titleLayout->addWidget(subtitle);
+        headerLayout->addLayout(titleLayout);
+        headerLayout->addStretch();
+        QPushButton *refreshButton = new QPushButton("刷新排行榜");
+        refreshButton->setObjectName("rankingRefreshButton");
+        headerLayout->addWidget(refreshButton);
+        contentLayout->addLayout(headerLayout);
+        return refreshButton;
+    }
+
+    QScrollArea *createRankingScrollArea()
+    {
+        QScrollArea *scrollArea = new QScrollArea;
+        scrollArea->setObjectName("rankingScrollArea");
+        scrollArea->setWidgetResizable(true);
+        scrollArea->setFrameShape(QFrame::NoFrame);
+        QWidget *content = new QWidget;
+        content->setObjectName("rankingContent");
+        QVBoxLayout *contentLayout = new QVBoxLayout(content);
+        contentLayout->setContentsMargins(24, 22, 24, 22);
+        contentLayout->setSpacing(16);
+        scrollArea->setWidget(content);
+        return scrollArea;
+    }
+
+    QLabel *createRankingStarIcon()
+    {
+        QLabel *icon = new QLabel;
+        icon->setObjectName("rankingStarIcon");
+        icon->setFixedSize(40, 40);
+        icon->setAlignment(Qt::AlignCenter);
+        icon->setPixmap(
+            QIcon(BadgeIconMapper::leiFengStarResourcePath())
+                .pixmap(QSize(36, 36)));
+        icon->setAccessibleName("雷锋之星");
+        icon->setToolTip("雷锋之星");
+        return icon;
+    }
+
+    QFrame *createRankingTopCard(int rank)
+    {
+        QFrame *card = new QFrame;
+        card->setObjectName("rankingTopCard");
+        card->setProperty(
+            "rankBand",
+            rank == 1
+                ? QStringLiteral("first")
+                : rank == 2
+                      ? QStringLiteral("second")
+                      : QStringLiteral("third"));
+        card->setProperty("currentStudent", false);
+        QVBoxLayout *cardLayout = new QVBoxLayout(card);
+        cardLayout->setContentsMargins(14, 12, 14, 12);
+        cardLayout->setSpacing(5);
+        QLabel *rankLabel = new QLabel;
+        rankLabel->setObjectName("rankingTopRank");
+        cardLayout->addWidget(rankLabel);
+        QHBoxLayout *honorLayout = new QHBoxLayout;
+        honorLayout->addWidget(createRankingStarIcon());
+        QLabel *starText = new QLabel("雷锋之星");
+        starText->setObjectName("rankingStarText");
+        honorLayout->addWidget(starText);
+        honorLayout->addStretch();
+        cardLayout->addLayout(honorLayout);
+        addRankingTopStudentFields(cardLayout);
+        return card;
+    }
+
+    void addRankingTopStudentFields(QVBoxLayout *cardLayout)
+    {
+        const QString objectNames[] = {
+            "rankingTopStudent",
+            "rankingTopAccount",
+            "rankingTopScore"};
+        for (const QString &objectName : objectNames)
+        {
+            QLabel *field = new QLabel;
+            field->setObjectName(objectName);
+            cardLayout->addWidget(field);
+        }
+    }
+
+    void updateRankingTopCard(
+        QFrame *card,
+        const RankingItem &item,
+        int rank,
+        const std::string &currentAccountId)
+    {
+        card->findChild<QLabel *>("rankingTopRank")
+            ->setText(QString("第 %1 名").arg(rank));
+        card->findChild<QLabel *>("rankingTopStudent")
+            ->setText(QString::fromStdString(item.studentName));
+        card->findChild<QLabel *>("rankingTopAccount")
+            ->setText(QString::fromStdString(item.studentId));
+        card->findChild<QLabel *>("rankingTopScore")
+            ->setText(QString("积分 %1").arg(item.score, 0, 'f', 2));
+        card->setProperty(
+            "currentStudent",
+            item.studentId == currentAccountId);
+        card->style()->unpolish(card);
+        card->style()->polish(card);
+        card->show();
+    }
+
+    void refreshRankingTopCards(
+        QWidget *rankingPage,
+        const std::vector<RankingItem> &ranking,
+        const std::string &currentAccountId)
+    {
+        QWidget *container = rankingPage->findChild<QWidget *>(
+            "rankingTopThreeContainer");
+        const QList<QFrame *> cards =
+            container->findChildren<QFrame *>(
+                "rankingTopCard",
+                Qt::FindDirectChildrenOnly);
+        for (int rank = 1; rank <= 3; ++rank)
+        {
+            QFrame *card = cards.at(rank - 1);
+            if (rank <= static_cast<int>(ranking.size()))
+            {
+                updateRankingTopCard(
+                    card, ranking[rank - 1], rank, currentAccountId);
+            }
+            else
+            {
+                card->hide();
+            }
+        }
+        container->setVisible(!ranking.empty());
+        rankingPage->findChild<QLabel *>("rankingEmptyState")
+            ->setVisible(ranking.empty());
+    }
+
+    void addRankingTableTextItem(
+        QTableWidget *table,
+        int row,
+        int column,
+        const QString &text,
+        const QString &studentId,
+        bool isCurrentStudent)
+    {
+        QTableWidgetItem *item = new QTableWidgetItem(text);
+        item->setData(Qt::UserRole, studentId);
+        if (column == 0 || column == 3)
+        {
+            item->setTextAlignment(Qt::AlignCenter);
+        }
+        if (isCurrentStudent)
+        {
+            item->setBackground(QColor("#FCEAED"));
+            QFont font = item->font();
+            font.setBold(true);
+            item->setFont(font);
+        }
+        table->setItem(row, column, item);
+    }
+
+    void addRankingTableSection(
+        QVBoxLayout *contentLayout,
+        QTableWidget **rankingTable)
+    {
+        QFrame *tableCard = new QFrame;
+        tableCard->setObjectName("rankingTableCard");
+        QVBoxLayout *tableLayout = new QVBoxLayout(tableCard);
+        tableLayout->setContentsMargins(16, 14, 16, 16);
+        tableLayout->setSpacing(10);
+        QLabel *title = new QLabel("完整排行榜");
+        title->setObjectName("rankingTableTitle");
+        tableLayout->addWidget(title);
+        *rankingTable = new QTableWidget;
+        configureRankingTable(*rankingTable);
+        tableLayout->addWidget(*rankingTable);
+        contentLayout->addWidget(tableCard);
+    }
+
+    void configureRankingTable(QTableWidget *table)
+    {
+        table->setObjectName("rankingTable");
+        table->setItemDelegate(
+            new RecordsNoCellFocusDelegate(table));
+        table->setColumnCount(5);
+        table->setHorizontalHeaderLabels(
+            {"排名", "学号", "姓名", "积分", "专项徽章"});
+        table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        table->setSelectionBehavior(QAbstractItemView::SelectRows);
+        table->setSelectionMode(QAbstractItemView::SingleSelection);
+        table->setSortingEnabled(false);
+        table->setAlternatingRowColors(true);
+        table->setShowGrid(false);
+        table->verticalHeader()->setVisible(false);
+        table->verticalHeader()->setDefaultSectionSize(48);
+        table->horizontalHeader()->setSectionResizeMode(
+            QHeaderView::Stretch);
+        table->setMinimumHeight(240);
+    }
+
+    void addRankingTopThreeSection(QVBoxLayout *contentLayout)
+    {
+        QFrame *section = new QFrame;
+        section->setObjectName("rankingTopSection");
+        QVBoxLayout *sectionLayout = new QVBoxLayout(section);
+        sectionLayout->setContentsMargins(16, 14, 16, 16);
+        sectionLayout->setSpacing(10);
+        QLabel *title = new QLabel("当前 Top 3 · 雷锋之星");
+        title->setObjectName("rankingSectionTitle");
+        sectionLayout->addWidget(title);
+        QLabel *caption = new QLabel(
+            "此荣誉根据当前排行榜前三名动态展示。");
+        caption->setObjectName("rankingSectionCaption");
+        sectionLayout->addWidget(caption);
+        addRankingTopCardContainer(sectionLayout);
+        contentLayout->addWidget(section);
+    }
+
+    void addRankingTopCardContainer(QVBoxLayout *sectionLayout)
+    {
+        QLabel *emptyState = new QLabel("暂无排行榜数据");
+        emptyState->setObjectName("rankingEmptyState");
+        emptyState->setAlignment(Qt::AlignCenter);
+        sectionLayout->addWidget(emptyState);
+        QWidget *container = new QWidget;
+        container->setObjectName("rankingTopThreeContainer");
+        QHBoxLayout *cardsLayout = new QHBoxLayout(container);
+        cardsLayout->setContentsMargins(0, 0, 0, 0);
+        cardsLayout->setSpacing(12);
+        for (int rank = 1; rank <= 3; ++rank)
+        {
+            QFrame *card = createRankingTopCard(rank);
+            cardsLayout->addWidget(card, 1);
+            card->hide();
+        }
+        sectionLayout->addWidget(container);
+    }
+
+    void addRankingSpecialtyIcon(
+        QHBoxLayout *layout,
+        const std::string &categoryId,
+        int earnedLevel,
+        const QString &badgeLabel)
+    {
+        const BadgeIconMapper::Level level =
+            static_cast<BadgeIconMapper::Level>(earnedLevel);
+        QLabel *icon = new QLabel;
+        icon->setObjectName("rankingSpecialtyBadge");
+        icon->setFixedSize(30, 30);
+        icon->setAlignment(Qt::AlignCenter);
+        icon->setPixmap(
+            QIcon(BadgeIconMapper::resourcePath(categoryId, level))
+                .pixmap(QSize(26, 26)));
+        icon->setAccessibleName(badgeLabel);
+        icon->setAccessibleDescription(badgeLabel);
+        icon->setToolTip(badgeLabel);
+        layout->addWidget(icon);
     }
 
 }
@@ -1409,63 +1678,18 @@ void StudentMainWindow::buildScorePage()
 void StudentMainWindow::buildRankingPage()
 {
     rankingPage = new QWidget;
-
-    QVBoxLayout *layout =
-        new QVBoxLayout(rankingPage);
-
-    QHBoxLayout *titleLayout =
-        new QHBoxLayout;
-
-    QLabel *titleLabel =
-        new QLabel("积分排行榜");
-
-    titleLabel->setStyleSheet(
-        StyleHelper::title());
-
-    QPushButton *refreshButton =
-        new QPushButton("刷新排行榜");
-
-    refreshButton->setStyleSheet(
-        StyleHelper::secondaryButton());
-
-    titleLayout->addWidget(titleLabel);
-    titleLayout->addStretch();
-    titleLayout->addWidget(refreshButton);
-
-    layout->addLayout(titleLayout);
-
-    rankingTable =
-        new QTableWidget;
-
-    rankingTable->setColumnCount(5);
-
-    rankingTable->setHorizontalHeaderLabels(
-        {"排名",
-         "学生账号",
-         "学生姓名",
-         "总积分",
-         "荣誉"});
-
-    rankingTable->setEditTriggers(
-        QAbstractItemView::NoEditTriggers);
-
-    rankingTable->setSelectionBehavior(
-        QAbstractItemView::SelectRows);
-
-    rankingTable->setSelectionMode(
-        QAbstractItemView::SingleSelection);
-
-    rankingTable->verticalHeader()
-        ->setVisible(false);
-
-    rankingTable->horizontalHeader()
-        ->setSectionResizeMode(
-            QHeaderView::Stretch);
-
-    rankingTable->setStyleSheet(
-        StyleHelper::table());
-
-    layout->addWidget(rankingTable);
+    rankingPage->setObjectName("studentRankingPage");
+    rankingPage->setStyleSheet(StyleHelper::studentRankingPage());
+    QVBoxLayout *pageLayout = new QVBoxLayout(rankingPage);
+    pageLayout->setContentsMargins(0, 0, 0, 0);
+    QScrollArea *scrollArea = createRankingScrollArea();
+    QWidget *content = scrollArea->widget();
+    QVBoxLayout *contentLayout =
+        qobject_cast<QVBoxLayout *>(content->layout());
+    QPushButton *refreshButton = createRankingHeader(contentLayout);
+    addRankingTopThreeSection(contentLayout);
+    addRankingTableSection(contentLayout, &rankingTable);
+    pageLayout->addWidget(scrollArea);
 
     connect(
         refreshButton,
@@ -2877,92 +3101,99 @@ void StudentMainWindow::calculateSemesterScore()
 void StudentMainWindow::refreshRankingPage()
 {
     if (dataManager == nullptr ||
+        rankingPage == nullptr ||
         rankingTable == nullptr)
     {
         return;
     }
-
-    rankingTable->setRowCount(0);
-
-    std::vector<RankingItem> ranking =
+    const std::vector<RankingItem> ranking =
         dataManager->generateRanking();
-
-    for (size_t i = 0;
-         i < ranking.size();
-         ++i)
+    refreshRankingTopCards(rankingPage, ranking, accountId);
+    rankingTable->setVisible(!ranking.empty());
+    rankingTable->setRowCount(static_cast<int>(ranking.size()));
+    for (int row = 0; row < static_cast<int>(ranking.size()); ++row)
     {
-        const RankingItem &item =
-            ranking[i];
-
-        int row =
-            rankingTable->rowCount();
-
-        rankingTable->insertRow(row);
-
-        rankingTable->setItem(
+        const RankingItem &item = ranking[row];
+        addRankingTableRow(
             row,
-            0,
-            new QTableWidgetItem(
-                QString::number(
-                    static_cast<int>(i + 1))));
+            row + 1,
+            item.studentId,
+            item.studentName,
+            item.score);
+    }
+}
 
-        rankingTable->setItem(
-            row,
-            1,
-            new QTableWidgetItem(
-                QString::fromStdString(
-                    item.studentId)));
+void StudentMainWindow::addRankingTableRow(
+    int row,
+    int rank,
+    const std::string &studentId,
+    const std::string &studentName,
+    double score)
+{
+    const QString id = QString::fromStdString(studentId);
+    const bool isCurrentStudent = studentId == accountId;
+    addRankingTableTextItem(
+        rankingTable, row, 0, QString::number(rank), id, isCurrentStudent);
+    addRankingTableTextItem(
+        rankingTable, row, 1, id, id, isCurrentStudent);
+    addRankingTableTextItem(
+        rankingTable,
+        row,
+        2,
+        QString::fromStdString(studentName) +
+            (isCurrentStudent ? "（你）" : ""),
+        id,
+        isCurrentStudent);
+    addRankingTableTextItem(
+        rankingTable,
+        row,
+        3,
+        QString::number(score, 'f', 2),
+        id,
+        isCurrentStudent);
+    rankingTable->setCellWidget(
+        row,
+        4,
+        createRankingSpecialtyBadgeStrip(studentId));
+}
 
-        rankingTable->setItem(
-            row,
-            2,
-            new QTableWidgetItem(
-                QString::fromStdString(
-                    item.studentName)));
+QWidget *StudentMainWindow::createRankingSpecialtyBadgeStrip(
+    const std::string &studentId) const
+{
+    QWidget *strip = new QWidget;
+    strip->setObjectName("rankingSpecialtyBadgeStrip");
+    strip->setProperty("currentStudent", studentId == accountId);
+    QHBoxLayout *layout = new QHBoxLayout(strip);
+    layout->setContentsMargins(6, 0, 6, 0);
+    layout->setSpacing(6);
+    for (const std::string &categoryId : {"C01", "C02", "C03"})
+    {
+        appendRankingSpecialtyBadge(layout, studentId, categoryId);
+    }
+    if (layout->count() == 0)
+    {
+        QLabel *emptyLabel = new QLabel("暂无专项徽章");
+        emptyLabel->setObjectName("rankingNoBadgeState");
+        layout->addWidget(emptyLabel);
+    }
+    return strip;
+}
 
-        rankingTable->setItem(
-            row,
-            3,
-            new QTableWidgetItem(
-                QString::number(
-                    item.score,
-                    'f',
-                    2)));
-
-        QString honor = "-";
-
-        if (i < 3)
-        {
-            honor = "雷锋之星";
-        }
-
-        rankingTable->setItem(
-            row,
-            4,
-            new QTableWidgetItem(honor));
-
-        if (item.studentId == accountId)
-        {
-            for (int column = 0;
-                 column < rankingTable->columnCount();
-                 ++column)
-            {
-                QTableWidgetItem *tableItem =
-                    rankingTable->item(
-                        row,
-                        column);
-
-                if (tableItem != nullptr)
-                {
-                    QFont font =
-                        tableItem->font();
-
-                    font.setBold(true);
-
-                    tableItem->setFont(font);
-                }
-            }
-        }
+void StudentMainWindow::appendRankingSpecialtyBadge(
+    QHBoxLayout *layout,
+    const std::string &studentId,
+    const std::string &categoryId) const
+{
+    const double duration =
+        dataManager->calculateStudentDurationByCategory(
+            studentId, categoryId);
+    int earnedLevel = 0;
+    const QString label = badgeText(
+        categoryId, duration, &earnedLevel);
+    if (earnedLevel > 0)
+    {
+        addRankingSpecialtyIcon(
+            layout, categoryId, earnedLevel, label);
     }
 }
 

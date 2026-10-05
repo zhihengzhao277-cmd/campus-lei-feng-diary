@@ -9,5 +9,6 @@
         <file alias="C03/bronze.svg">badges/badge_c03_bronze.svg</file>
         <file alias="C03/silver.svg">badges/badge_c03_silver.svg</file>
         <file alias="C03/gold.svg">badges/badge_c03_gold.svg</file>
+        <file alias="lei_feng_star.svg">badges/badge_leifeng_star.svg</file>
     </qresource>
 </RCC>

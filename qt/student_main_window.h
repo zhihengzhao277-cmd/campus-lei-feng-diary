@@ -13,6 +13,7 @@ class QComboBox;
 class QDateEdit;
 class QScrollArea;
 class QVBoxLayout;
+class QHBoxLayout;
 class DataManager;
 class QLabel;
 class QListWidget;
@@ -95,6 +96,18 @@ private:
     void buildScorePage();
     void buildSubmitPage();
     void buildRankingPage();
+    QWidget *createRankingSpecialtyBadgeStrip(
+        const std::string &studentId) const;
+    void appendRankingSpecialtyBadge(
+        QHBoxLayout *layout,
+        const std::string &studentId,
+        const std::string &categoryId) const;
+    void addRankingTableRow(
+        int row,
+        int rank,
+        const std::string &studentId,
+        const std::string &studentName,
+        double score);
     void buildBadgePage();
     void refreshAchievementCategory(
         const char *categoryId,

@@ -35,6 +35,11 @@ public:
         return QString();
     }
 
+    static QString leiFengStarResourcePath()
+    {
+        return QStringLiteral(":/badges/lei_feng_star.svg");
+    }
+
 private:
     static QString levelPath(
         const char *category,

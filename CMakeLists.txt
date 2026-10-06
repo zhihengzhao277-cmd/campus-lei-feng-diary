@@ -67,3 +67,24 @@ target_link_libraries(
     PRIVATE
     Qt6::Widgets
 )
+
+include(CTest)
+
+if(BUILD_TESTING)
+    add_executable(
+        core_behavior_tests
+        tests/core_behavior_tests.cpp
+        ${CORE_SOURCES}
+    )
+
+    target_include_directories(
+        core_behavior_tests
+        PRIVATE
+        core
+    )
+
+    add_test(
+        NAME core_behavior_tests
+        COMMAND core_behavior_tests
+    )
+endif()

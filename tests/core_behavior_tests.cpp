@@ -1,4 +1,5 @@
 #include "data_manager.h"
+#include "diary_service.h"
 #include "diary_post.h"
 #include "student_volunteer_service.h"
 #include "volunteer_category.h"
@@ -269,6 +270,81 @@ void testDiaryPostLikes()
     require(diary.getLikeCount() == 1, "duplicate like should not increment the count");
 }
 
+void testDiaryServicePublishesOnlyApprovedPostsWithRecordOwnerFacts()
+{
+    DataManager data;
+    data.addStudent(Student("S_OWNER", "Record Owner", "unused", "Class A", "Major A"));
+    data.addStudent(Student("S_OTHER", "Other Owner", "unused", "Class B", "Major B"));
+    data.addStudent(Student("S_LEGACY", "Legacy Publisher", "unused", "Class C", "Major C"));
+
+    data.addRecord(makeRecord(
+        "R_OWNER", "S_OWNER", "C01", "2026/05/01", 1.5,
+        RecordStatus::Approved, 3.0));
+    data.addRecord(makeRecord(
+        "R_PENDING", "S_OTHER", "C02", "2026/05/02", 2.0,
+        RecordStatus::Pending, 0.0));
+    data.addRecord(makeRecord(
+        "R_OTHER", "S_OTHER", "C02", "2026/05/03", 0.5,
+        RecordStatus::Approved, 1.0));
+    data.addRecord(makeRecord(
+        "R_MISSING_OWNER", "S_NOT_PRESENT", "C03", "2026/05/04", 1.0,
+        RecordStatus::Approved, 1.0));
+
+    DiaryPost first("D_FIRST", "S_LEGACY", "R_OWNER", "First approved post", 2);
+    first.addLikedStudentId("S_VIEWER");
+    data.addDiary(first);
+    data.addDiary(DiaryPost("D_MISSING_RECORD", "S_OWNER", "R_NOT_PRESENT", "No record"));
+    data.addDiary(DiaryPost("D_PENDING", "S_OWNER", "R_PENDING", "Not approved"));
+    data.addDiary(DiaryPost("D_MISSING_OWNER", "S_LEGACY", "R_MISSING_OWNER", "No owner"));
+    data.addDiary(DiaryPost("D_SECOND", "S_LEGACY", "R_OTHER", "Second approved post", 1));
+
+    DiaryService service(data);
+    const vector<DiaryPostPublicView> feed = service.queryPublicFeed("S_VIEWER");
+
+    require(feed.size() == 2,
+            "only Approved diary posts with an existing record owner should be returned");
+    require(feed[0].diaryId == "D_FIRST" && feed[1].diaryId == "D_SECOND",
+            "public feed should retain stored diary order among eligible posts");
+    require(feed[0].authorAccountId == "S_OWNER",
+            "public author account should come from the linked record owner, not legacy diary student ID");
+    require(feed[0].authorName == "Record Owner",
+            "public author name should come from the linked record owner");
+    require(feed[0].categoryName == "劳动服务",
+            "public category should expose its display name");
+    require(feed[0].serviceDate == "2026/05/01",
+            "public service date should come from the linked record");
+    requireNear(feed[0].durationHours, 1.5,
+                "public duration should come from the linked record");
+    require(feed[0].place == "Campus",
+            "public place should come from the linked record");
+    require(feed[0].content == "First approved post",
+            "public content should come from the diary post");
+    require(feed[0].likeCount == 2 && feed[0].likedByCurrentStudent,
+            "public view should report the stored like count and current student's like state");
+    require(feed[1].authorAccountId == "S_OTHER" &&
+                feed[1].authorName == "Other Owner" &&
+                feed[1].categoryName == "环保服务" &&
+                !feed[1].likedByCurrentStudent,
+            "later eligible post should expose its own owner, category and unliked state");
+    require(data.getDiaries().getItems()[0].getLikeCount() == 2 &&
+                data.getDiaries().getItems()[0].getLikedStudentIds().size() == 1,
+            "querying the public feed should not mutate diary likes");
+}
+
+void testDiaryServiceReturnsEmptyForIneligiblePosts()
+{
+    DataManager data;
+    data.addRecord(makeRecord(
+        "R_PENDING_ONLY", "S_NOT_PRESENT", "C01", "2026/05/05", 1.0,
+        RecordStatus::Pending, 0.0));
+    data.addDiary(DiaryPost(
+        "D_PENDING_ONLY", "S_LEGACY", "R_PENDING_ONLY", "No public post"));
+
+    DiaryService service(data);
+    require(service.queryPublicFeed("S_VIEWER").empty(),
+            "feed should be empty when no post has both an Approved record and owner student");
+}
+
 StudentVolunteerInput validStudentVolunteerInput()
 {
     return {
@@ -466,6 +542,8 @@ int main()
         testVolunteerRecordTransitions();
         testDataManagerDerivedQueries();
         testDiaryPostLikes();
+        testDiaryServicePublishesOnlyApprovedPostsWithRecordOwnerFacts();
+        testDiaryServiceReturnsEmptyForIneligiblePosts();
         testStudentVolunteerSubmitDurationAndCategoryRules();
         testStudentVolunteerModifyRejectsForeignApprovedAndInvalidChanges();
         testStudentVolunteerModifyResubmitsRejectedRecord();

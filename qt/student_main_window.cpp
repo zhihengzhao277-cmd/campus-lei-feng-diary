@@ -41,6 +41,7 @@
 #include <cmath>
 
 #include "data_manager.h"
+#include "diary_service.h"
 #include "diary_post.h"
 #include "student_volunteer_service.h"
 #include "student.h"
@@ -3297,15 +3298,15 @@ void StudentMainWindow::refreshDiaryWall()
         delete item;
     }
 
-    const std::vector<DiaryPost> &diaries =
-        dataManager->getDiaries().getItems();
+    const DiaryService diaryService(*dataManager);
+    const std::vector<DiaryPostPublicView> feed =
+        diaryService.queryPublicFeed(accountId);
 
-    if (diaries.empty())
+    if (feed.empty())
     {
         QLabel *emptyLabel =
             new QLabel(
-                "暂时还没有志愿日记。\n"
-                "分享一次志愿行动，让校园里的温暖被看见。");
+                "暂无可展示的志愿日记");
 
         emptyLabel->setObjectName(
             "studentDiaryEmptyState");
@@ -3322,14 +3323,8 @@ void StudentMainWindow::refreshDiaryWall()
         return;
     }
 
-    for (const DiaryPost &diary : diaries)
+    for (const DiaryPostPublicView &diary : feed)
     {
-        Student *author =
-            dataManager->findStudent(diary.getStudentId());
-
-        VolunteerRecord *record =
-            dataManager->findRecord(diary.getRecordId());
-
         QFrame *card =
             new QFrame;
         card->setObjectName("studentDiaryPostCard");
@@ -3358,15 +3353,8 @@ void StudentMainWindow::refreshDiaryWall()
         avatarLabel->setAlignment(
             Qt::AlignCenter);
 
-        QString authorName =
-            "未知学生";
-
-        if (author != nullptr)
-        {
-            authorName =
-                QString::fromStdString(
-                    author->getName());
-        }
+        const QString authorName =
+            QString::fromStdString(diary.authorName);
 
         QVBoxLayout *authorTextLayout =
             new QVBoxLayout;
@@ -3379,7 +3367,7 @@ void StudentMainWindow::refreshDiaryWall()
 
         QLabel *authorIdLabel =
             new QLabel(QString::fromStdString(
-                diary.getStudentId()));
+                diary.authorAccountId));
         authorIdLabel->setObjectName(
             "studentDiaryAuthorId");
         authorTextLayout->addWidget(authorLabel);
@@ -3395,34 +3383,30 @@ void StudentMainWindow::refreshDiaryWall()
         cardLayout->addLayout(
             authorLayout);
 
-        if (record != nullptr)
-        {
-            QLabel *recordLabel =
-                new QLabel(
-                    categoryName(record->getCategoryId()) +
-                    " · " +
-                    QString::fromStdString(record->getDate()) +
-                    " · " +
-                    QString::number(record->getDuration(), 'f', 1) +
-                    " 小时");
-            recordLabel->setObjectName(
-                "studentDiaryFact");
-            cardLayout->addWidget(recordLabel);
+        QLabel *recordLabel =
+            new QLabel(
+                QString::fromStdString(diary.categoryName) +
+                " · " +
+                QString::fromStdString(diary.serviceDate) +
+                " · " +
+                QString::number(diary.durationHours, 'f', 1) +
+                " 小时");
+        recordLabel->setObjectName(
+            "studentDiaryFact");
+        cardLayout->addWidget(recordLabel);
 
-            QLabel *placeLabel =
-                new QLabel(
-                    "地点：" +
-                    QString::fromStdString(
-                        record->getPlace()));
-            placeLabel->setObjectName(
-                "studentDiaryFact");
-            cardLayout->addWidget(placeLabel);
-        }
+        QLabel *placeLabel =
+            new QLabel(
+                "地点：" +
+                QString::fromStdString(diary.place));
+        placeLabel->setObjectName(
+            "studentDiaryFact");
+        cardLayout->addWidget(placeLabel);
 
         QLabel *messageLabel =
             new QLabel(
                 QString::fromStdString(
-                    diary.getMessage()));
+                    diary.content));
         messageLabel->setObjectName(
             "studentDiaryMessage");
         messageLabel->setWordWrap(true);
@@ -3435,8 +3419,8 @@ void StudentMainWindow::refreshDiaryWall()
 
         bottomLayout->addStretch();
 
-        bool alreadyLiked =
-            diary.hasLiked(accountId);
+        const bool alreadyLiked =
+            diary.likedByCurrentStudent;
 
         QPushButton *likeButton =
             new QPushButton;
@@ -3454,7 +3438,7 @@ void StudentMainWindow::refreshDiaryWall()
         QLabel *likeCountLabel =
             new QLabel(
                 QString::number(
-                    diary.getLikeCount()));
+                    diary.likeCount));
         likeCountLabel->setObjectName(
             "studentDiaryLikeCount");
         likeCountLabel->setProperty(
@@ -3464,8 +3448,8 @@ void StudentMainWindow::refreshDiaryWall()
         likeButton->setText(
             alreadyLiked ? "♥" : "♡");
 
-        std::string diaryId =
-            diary.getDiaryId();
+        const std::string diaryId =
+            diary.diaryId;
 
         connect(
             likeButton,

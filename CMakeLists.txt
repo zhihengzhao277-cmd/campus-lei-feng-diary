@@ -40,6 +40,8 @@ set(CORE_SOURCES
     core/volunteer_record.cpp
     core/volunteer_category.cpp
     core/diary_post.cpp
+    core/diary_service.h
+    core/diary_service.cpp
     core/data_manager.cpp
     core/student_volunteer_service.h
     core/student_volunteer_service.cpp

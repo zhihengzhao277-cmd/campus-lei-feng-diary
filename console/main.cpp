@@ -1,10 +1,56 @@
 #include "data_manager.h"
+#include "student_volunteer_service.h"
+
+#include <cmath>
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <limits>
 #include <string>
 using namespace std;
+
+enum class StudentVolunteerAction
+{
+    Submit,
+    Modify,
+    Delete
+};
+
+bool isValidStudentVolunteerDuration(double durationHours)
+{
+    return isfinite(durationHours) &&
+           durationHours > 0.0 &&
+           abs(remainder(durationHours, 0.5)) <= 1e-9;
+}
+
+string studentVolunteerFailureMessage(
+    StudentVolunteerStatus status,
+    StudentVolunteerAction action)
+{
+    switch (status)
+    {
+    case StudentVolunteerStatus::CategoryNotFound:
+        return "志愿类别不存在。";
+    case StudentVolunteerStatus::InvalidDuration:
+        return "服务时长必须大于 0，并以 0.5 小时为单位。";
+    case StudentVolunteerStatus::RecordNotFound:
+        return action == StudentVolunteerAction::Delete
+            ? "志愿记录不存在。"
+            : "记录不存在。";
+    case StudentVolunteerStatus::NotOwner:
+        return action == StudentVolunteerAction::Delete
+            ? "不能删除其他学生的记录。"
+            : "不能修改其他学生的记录。";
+    case StudentVolunteerStatus::ApprovedRecordLocked:
+        return action == StudentVolunteerAction::Delete
+            ? "审核通过的记录不能由学生删除。"
+            : "审核通过的记录不能修改。";
+    case StudentVolunteerStatus::Success:
+        return {};
+    }
+
+    return "志愿记录操作失败。";
+}
 
 string readText(const string &prompt)
 {
@@ -332,9 +378,11 @@ void submitRecord(
     double duration =
         readDouble("请输入服务时长：");
 
-    if (duration <= 0)
+    // Keep early input feedback; the Service repeats this as the
+    // authoritative execution-time check.
+    if (!isValidStudentVolunteerDuration(duration))
     {
-        cout << "服务时长必须大于 0。\n";
+        cout << "服务时长必须大于 0，并以 0.5 小时为单位。\n";
         return;
     }
 
@@ -347,17 +395,26 @@ void submitRecord(
     string description =
         readText("请输入志愿事迹简述：");
 
-    VolunteerRecord record(
-        data.generateRecordId(),
-        student.getAccountId(),
+    StudentVolunteerInput input{
         categoryId,
         date,
         duration,
         place,
         witness,
-        description);
+        description};
+    StudentVolunteerService service(data);
+    const StudentVolunteerOutcome outcome =
+        service.submit(student.getAccountId(), input);
 
-    data.addRecord(record);
+    if (!outcome.succeeded())
+    {
+        cout << studentVolunteerFailureMessage(
+                   outcome.status,
+                   StudentVolunteerAction::Submit)
+             << '\n';
+        return;
+    }
+
     data.saveRecords();
 
     cout << "志愿记录提交成功，等待管理员审核。\n";
@@ -646,29 +703,46 @@ void modifyPendingRecord(
         return;
     }
 
-    record->setCategoryId(categoryId);
-    record->setDate(
-        readText("新的服务日期（例如：2025/10/01）："));
+    string date =
+        readText("新的服务日期（例如：2025/10/01）：");
 
     double duration =
         readDouble("新的服务时长：");
 
-    if (duration <= 0)
+    // Keep early input feedback; the Service repeats this as the
+    // authoritative execution-time check.
+    if (!isValidStudentVolunteerDuration(duration))
     {
-        cout << "服务时长必须大于 0。\n";
+        cout << "服务时长必须大于 0，并以 0.5 小时为单位。\n";
         return;
     }
 
-    record->setDuration(duration);
-    record->setPlace(readText("新的服务地点："));
-    record->setWitness(readText("新的证明人："));
+    string place = readText("新的服务地点：");
+    string witness = readText("新的证明人：");
 
-    record->setDescription(
-        readText("新的志愿事迹简述："));
+    string description =
+        readText("新的志愿事迹简述：");
 
-    if (record->getStatus() == RecordStatus::Rejected)
+    StudentVolunteerInput input{
+        categoryId,
+        date,
+        duration,
+        place,
+        witness,
+        description};
+    StudentVolunteerService service(data);
+    const StudentVolunteerOutcome outcome = service.modify(
+        student.getAccountId(),
+        recordId,
+        input);
+
+    if (!outcome.succeeded())
     {
-        record->resubmit();
+        cout << studentVolunteerFailureMessage(
+                   outcome.status,
+                   StudentVolunteerAction::Modify)
+             << '\n';
+        return;
     }
 
     data.saveRecords();
@@ -750,14 +824,21 @@ void deleteVolunteerRecord(
         return;
     }
 
-    if (data.deleteRecord(recordId))
+    StudentVolunteerService service(data);
+    const StudentVolunteerOutcome outcome =
+        service.deleteRecord(student.getAccountId(), recordId);
+
+    if (outcome.succeeded())
     {
         data.saveRecords();
         cout << "志愿记录删除成功。\n";
     }
     else
     {
-        cout << "删除失败。\n";
+        cout << studentVolunteerFailureMessage(
+                   outcome.status,
+                   StudentVolunteerAction::Delete)
+             << '\n';
     }
 }
 

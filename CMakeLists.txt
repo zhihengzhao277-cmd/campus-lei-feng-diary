@@ -19,6 +19,8 @@ set(CORE_SOURCES
     core/volunteer_category.cpp
     core/diary_post.cpp
     core/data_manager.cpp
+    core/student_volunteer_service.h
+    core/student_volunteer_service.cpp
 )
 
 add_executable(

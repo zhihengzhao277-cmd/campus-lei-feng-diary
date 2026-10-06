@@ -42,6 +42,7 @@
 
 #include "data_manager.h"
 #include "diary_post.h"
+#include "student_volunteer_service.h"
 #include "student.h"
 #include "volunteer_record.h"
 
@@ -77,6 +78,42 @@ namespace
         return text.contains('|') ||
                text.contains('\n') ||
                text.contains('\r');
+    }
+
+    enum class StudentVolunteerOperation
+    {
+        Submit,
+        Modify,
+        Delete
+    };
+
+    QString studentVolunteerFailureMessage(
+        StudentVolunteerStatus status,
+        StudentVolunteerOperation operation)
+    {
+        switch (status)
+        {
+        case StudentVolunteerStatus::CategoryNotFound:
+            return "志愿类别不存在。";
+        case StudentVolunteerStatus::InvalidDuration:
+            return "服务时长必须大于 0，并以 0.5 小时为单位。";
+        case StudentVolunteerStatus::RecordNotFound:
+            return operation == StudentVolunteerOperation::Delete
+                ? "志愿记录不存在。"
+                : "未找到该志愿记录。";
+        case StudentVolunteerStatus::NotOwner:
+            return operation == StudentVolunteerOperation::Delete
+                ? "不能删除其他学生的记录。"
+                : "不能修改其他学生的记录。";
+        case StudentVolunteerStatus::ApprovedRecordLocked:
+            return operation == StudentVolunteerOperation::Delete
+                ? "已审核通过的记录不能删除。"
+                : "已审核通过的记录不能修改。";
+        case StudentVolunteerStatus::Success:
+            return {};
+        }
+
+        return "志愿记录操作失败。";
     }
 
     QLabel *createAchievementBadgeIcon(
@@ -2702,32 +2739,27 @@ void StudentMainWindow::modifySelectedRecord()
         return;
     }
 
-    // 所有输入都成功以后再真正修改，
-    // 避免中途取消导致只修改了一半。
+    StudentVolunteerInput input{
+        newCategoryId,
+        newDate.toStdString(),
+        newDuration,
+        newPlace.toStdString(),
+        newWitness.toStdString(),
+        newDescription.toStdString()};
 
-    record->setCategoryId(
-        newCategoryId);
+    StudentVolunteerService service(*dataManager);
+    const StudentVolunteerOutcome outcome =
+        service.modify(accountId, recordId, input);
 
-    record->setDate(
-        newDate.toStdString());
-
-    record->setDuration(
-        newDuration);
-
-    record->setPlace(
-        newPlace.toStdString());
-
-    record->setWitness(
-        newWitness.toStdString());
-
-    record->setDescription(
-        newDescription.toStdString());
-
-    // 驳回记录修改以后重新进入待审核状态。
-    if (record->getStatus() ==
-        RecordStatus::Rejected)
+    if (!outcome.succeeded())
     {
-        record->resubmit();
+        QMessageBox::warning(
+            this,
+            "修改失败",
+            studentVolunteerFailureMessage(
+                outcome.status,
+                StudentVolunteerOperation::Modify));
+        return;
     }
 
     dataManager->saveRecords();
@@ -2821,16 +2853,18 @@ void StudentMainWindow::deleteSelectedRecord()
         return;
     }
 
-    bool deleted =
-        dataManager->deleteRecord(
-            recordId);
+    StudentVolunteerService service(*dataManager);
+    const StudentVolunteerOutcome outcome =
+        service.deleteRecord(accountId, recordId);
 
-    if (!deleted)
+    if (!outcome.succeeded())
     {
         QMessageBox::warning(
             this,
             "删除失败",
-            "删除志愿记录失败。");
+            studentVolunteerFailureMessage(
+                outcome.status,
+                StudentVolunteerOperation::Delete));
 
         return;
     }
@@ -2942,22 +2976,30 @@ void StudentMainWindow::submitVolunteerRecord()
         return;
     }
 
-    std::string recordId =
-        dataManager->generateRecordId();
-
-    VolunteerRecord record(
-        recordId,
-        accountId,
+    StudentVolunteerInput input{
         categoryId,
         date,
         duration,
         place,
         witness,
-        description,
-        RecordStatus::Pending,
-        0.0);
+        description};
 
-    dataManager->addRecord(record);
+    StudentVolunteerService service(*dataManager);
+    const StudentVolunteerOutcome outcome =
+        service.submit(accountId, input);
+
+    if (!outcome.succeeded())
+    {
+        QMessageBox::information(
+            this,
+            "提示",
+            studentVolunteerFailureMessage(
+                outcome.status,
+                StudentVolunteerOperation::Submit));
+        return;
+    }
+
+    const std::string &recordId = outcome.recordId;
 
     dataManager->saveRecords();
 

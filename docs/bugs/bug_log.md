@@ -3,7 +3,7 @@
 ## BUG-RUNTIME-001 — Relative data path depends on process working directory
 
 - **Discovered:** IU-UI-06 verification
-- **Status:** OPEN / DEFERRED
+- **Status:** CLOSED
 
 ### Reproduction
 
@@ -26,15 +26,22 @@ Valid accounts should authenticate regardless of where the executable is launche
 
 Launching the same executable with the project root as its working directory restores normal login.
 
-### Current workaround
+### Pre-fix workaround
 
 Launch the development executable with the project root as its working directory.
 
-### Planned handling
+### Original planned handling (superseded)
 
-Resolve explicitly during the later Persistence / runtime-path architecture cleanup. Do not change path semantics during the current UI phase.
+Superseded by the IU-ARCH-03B fix recorded below.
 
 ### Fix and regression
 
-- **Fix commit:** None; this bug is not fixed in IU-GIT-05.
-- **Regression:** The project-root launch was observed to restore login; post-fix regression remains pending until the planned runtime-path work.
+- **Fix:** Qt resolves runtime data from the executable-adjacent `data/` directory. Missing required runtime data causes an explicit startup failure before login.
+- **Implementation commit:** `1c68f36`
+- **Regression:**
+  - Build-directory working directory: PASS
+  - Project-root working directory: PASS
+  - Unrelated working directory: PASS
+  - Missing required file startup failure: PASS
+  - CTest: 1/1 PASS
+  - Tracked source `data/`: unchanged

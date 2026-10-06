@@ -127,6 +127,14 @@ void createSyntheticRuntimeData(const filesystem::path &root)
         "logId,operatorAccountId,operationType,targetType,targetId,description,operationTime\n");
 }
 
+void createReviewRuntimeData(
+    const filesystem::path &root,
+    const string &recordLines)
+{
+    createSyntheticRuntimeData(root);
+    writeRuntimeFile(root, "records.txt", recordLines);
+}
+
 void testDataManagerLoadsFromExplicitSyntheticRoot()
 {
     ScopedTemporaryDirectory temporaryDirectory("valid_root");
@@ -555,10 +563,20 @@ void testStudentVolunteerRejectsMissingTargets()
 
 void testVolunteerReviewPreviewAndApprovalUseCurrentCategoryScore()
 {
-    DataManager data;
+    ScopedTemporaryDirectory temporaryDirectory(
+        "review_approval_audit");
+    createReviewRuntimeData(
+        temporaryDirectory.path(),
+        "R_REVIEW_C01|S9001|C01|2026/06/01|1.75|Campus|Witness|Synthetic|0|0.00\n"
+        "R_REVIEW_C02|S9001|C02|2026/06/01|1.75|Campus|Witness|Synthetic|0|0.00\n"
+        "R_REVIEW_C03|S9001|C03|2026/06/01|1.75|Campus|Witness|Synthetic|0|0.00\n");
+    DataManager data(temporaryDirectory.path());
+    require(data.loadAll(),
+            "synthetic review files should load before approval");
     VolunteerReviewService service(data);
 
     const vector<string> categoryIds = {"C01", "C02", "C03"};
+    size_t expectedLogCount = 0;
     for (const string &categoryId : categoryIds)
     {
         const string recordId = "R_REVIEW_" + categoryId;
@@ -576,6 +594,7 @@ void testVolunteerReviewPreviewAndApprovalUseCurrentCategoryScore()
                 "built-in review category should exist");
         const double expectedScore =
             category->calculateScore(beforePreview->getDuration());
+        const size_t logsBeforePreview = data.getOperationLogs().size();
 
         require(preview.succeeded(),
                 "Pending record approval preview should succeed");
@@ -583,6 +602,8 @@ void testVolunteerReviewPreviewAndApprovalUseCurrentCategoryScore()
                 "successful approval preview should return a score");
         requireNear(*preview.approvalScore, expectedScore,
                     "preview score should use VolunteerCategory calculation");
+        require(data.getOperationLogs().size() == logsBeforePreview,
+                "approval preview must not append an audit log");
 
         const VolunteerRecord *afterPreview = data.findRecord(recordId);
         require(afterPreview != nullptr &&
@@ -591,7 +612,8 @@ void testVolunteerReviewPreviewAndApprovalUseCurrentCategoryScore()
         requireNear(afterPreview->getScore(), 0.0,
                     "approval preview should not change stored score");
 
-        const VolunteerReviewOutcome approval = service.approve(recordId);
+        const VolunteerReviewOutcome approval = service.approve(
+            "A9001", recordId);
         require(approval.succeeded(),
                 "Pending record approval should succeed");
         require(approval.approvalScore.has_value(),
@@ -605,25 +627,65 @@ void testVolunteerReviewPreviewAndApprovalUseCurrentCategoryScore()
                 "successful review should transition record to Approved");
         requireNear(approved->getScore(), expectedScore,
                     "Approved record should store category-calculated score");
+        ++expectedLogCount;
+        require(data.getOperationLogs().size() == expectedLogCount,
+                "each successful approval should append exactly one log");
+        const OperationLog &log = data.getOperationLogs().back();
+        require(log.getOperatorAccountId() == "A9001" &&
+                    log.getOperationType() ==
+                        OperationType::VolunteerRecordApproved &&
+                    log.getTargetType() ==
+                        OperationTargetType::VolunteerRecord &&
+                    log.getTargetId() == recordId &&
+                    log.getDescription() == "志愿记录审核通过",
+                "approval audit should preserve operator, type, target and description");
+    }
+
+    DataManager reloaded(temporaryDirectory.path());
+    require(reloaded.loadAll(),
+            "approved records and audit logs should reload together");
+    require(reloaded.getOperationLogs().size() == 3,
+            "all successful approvals should be durably recorded once");
+    for (const string &categoryId : categoryIds)
+    {
+        const string recordId = "R_REVIEW_" + categoryId;
+        const VolunteerRecord *record = reloaded.findRecord(recordId);
+        require(record != nullptr &&
+                record->getStatus() == RecordStatus::Approved,
+                "approved state should persist with its audit history");
+        bool matchingAuditFound = false;
+        for (const OperationLog &log : reloaded.getOperationLogs())
+        {
+            if (log.getTargetId() == recordId &&
+                log.getOperationType() ==
+                    OperationType::VolunteerRecordApproved &&
+                log.getOperatorAccountId() == "A9001")
+            {
+                matchingAuditFound = true;
+                break;
+            }
+        }
+        require(matchingAuditFound,
+                "reloaded approved record should have its matching operator audit");
     }
 }
 
 void testVolunteerReviewRejectAndNonPendingGuards()
 {
-    DataManager data;
-    data.addRecord(makeRecord(
-        "R_REVIEW_REJECT", "S_REVIEW", "missing-category", "2026/06/02",
-        1.0, RecordStatus::Pending, 9.0));
-    data.addRecord(makeRecord(
-        "R_REVIEW_APPROVED", "S_REVIEW", "C01", "2026/06/03",
-        1.0, RecordStatus::Approved, 2.0));
-    data.addRecord(makeRecord(
-        "R_REVIEW_REJECTED", "S_REVIEW", "C02", "2026/06/04",
-        1.0, RecordStatus::Rejected, 0.0));
+    ScopedTemporaryDirectory temporaryDirectory(
+        "review_rejection_audit");
+    createReviewRuntimeData(
+        temporaryDirectory.path(),
+        "R_REVIEW_REJECT|S9001|missing-category|2026/06/02|1.00|Campus|Witness|Synthetic|0|0.00\n"
+        "R_REVIEW_APPROVED|S9001|C01|2026/06/03|1.00|Campus|Witness|Synthetic|1|2.00\n"
+        "R_REVIEW_REJECTED|S9001|C02|2026/06/04|1.00|Campus|Witness|Synthetic|2|0.00\n");
+    DataManager data(temporaryDirectory.path());
+    require(data.loadAll(),
+            "synthetic review files should load before rejection");
     VolunteerReviewService service(data);
 
     const VolunteerReviewOutcome rejection =
-        service.reject("R_REVIEW_REJECT");
+        service.reject("A9001", "R_REVIEW_REJECT");
     require(rejection.succeeded(),
             "Pending record should be rejectable without category lookup");
     const VolunteerRecord *rejected = data.findRecord("R_REVIEW_REJECT");
@@ -632,6 +694,15 @@ void testVolunteerReviewRejectAndNonPendingGuards()
             "successful rejection should transition record to Rejected");
     requireNear(rejected->getScore(), 0.0,
                 "rejection should preserve Domain score-reset behavior");
+    require(data.getOperationLogs().size() == 1,
+            "successful rejection should append exactly one log");
+    const OperationLog &rejectionLog = data.getOperationLogs().front();
+    require(rejectionLog.getOperatorAccountId() == "A9001" &&
+                rejectionLog.getOperationType() ==
+                    OperationType::VolunteerRecordRejected &&
+                rejectionLog.getTargetId() == "R_REVIEW_REJECT" &&
+                rejectionLog.getDescription() == "志愿记录审核驳回",
+            "rejection audit should identify its operator and target");
 
     const vector<pair<string, RecordStatus>> nonPendingRecords = {
         {"R_REVIEW_APPROVED", RecordStatus::Approved},
@@ -646,10 +717,10 @@ void testVolunteerReviewRejectAndNonPendingGuards()
         require(service.previewApprovalScore(recordId).status ==
                     VolunteerReviewStatus::RecordNotPending,
                 "preview should reject non-Pending records");
-        require(service.approve(recordId).status ==
+        require(service.approve("A9001", recordId).status ==
                     VolunteerReviewStatus::RecordNotPending,
                 "approval should reject non-Pending records");
-        require(service.reject(recordId).status ==
+        require(service.reject("A9001", recordId).status ==
                     VolunteerReviewStatus::RecordNotPending,
                 "rejection should reject non-Pending records");
 
@@ -659,33 +730,45 @@ void testVolunteerReviewRejectAndNonPendingGuards()
         requireNear(after->getScore(), expectedScore,
                     "non-Pending review attempts should preserve score");
     }
+    require(data.getOperationLogs().size() == 1,
+            "non-Pending actions must not add audit logs");
+
+    DataManager reloaded(temporaryDirectory.path());
+    require(reloaded.loadAll() && reloaded.getOperationLogs().size() == 1,
+            "rejection state and its single audit fact should reload");
+    const VolunteerRecord *reloadedRejected =
+        reloaded.findRecord("R_REVIEW_REJECT");
+    require(reloadedRejected != nullptr &&
+                reloadedRejected->getStatus() == RecordStatus::Rejected,
+            "rejected state should reload with the persisted audit fact");
 }
 
 void testVolunteerReviewReportsMissingRecordsAndCategories()
 {
-    DataManager data;
-    data.addRecord(makeRecord(
-        "R_REVIEW_NO_CATEGORY", "S_REVIEW", "missing-category",
-        "2026/06/05", 1.5, RecordStatus::Pending, 7.0));
-    data.addRecord(makeRecord(
-        "R_REVIEW_NO_CATEGORY_REJECT", "S_REVIEW", "also-missing",
-        "2026/06/06", 0.5, RecordStatus::Pending, 8.0));
+    ScopedTemporaryDirectory temporaryDirectory(
+        "review_invalid_actions");
+    createReviewRuntimeData(
+        temporaryDirectory.path(),
+        "R_REVIEW_NO_CATEGORY|S9001|missing-category|2026/06/05|1.50|Campus|Witness|Synthetic|0|7.00\n");
+    DataManager data(temporaryDirectory.path());
+    require(data.loadAll(),
+            "synthetic review files should load before invalid actions");
     VolunteerReviewService service(data);
 
     require(service.previewApprovalScore("missing-record").status ==
                 VolunteerReviewStatus::RecordNotFound,
             "preview should report a missing record");
-    require(service.approve("missing-record").status ==
+    require(service.approve("A9001", "missing-record").status ==
                 VolunteerReviewStatus::RecordNotFound,
             "approval should report a missing record");
-    require(service.reject("missing-record").status ==
+    require(service.reject("A9001", "missing-record").status ==
                 VolunteerReviewStatus::RecordNotFound,
             "rejection should report a missing record");
 
     require(service.previewApprovalScore("R_REVIEW_NO_CATEGORY").status ==
                 VolunteerReviewStatus::CategoryNotFound,
             "preview should report a missing category");
-    require(service.approve("R_REVIEW_NO_CATEGORY").status ==
+    require(service.approve("A9001", "R_REVIEW_NO_CATEGORY").status ==
                 VolunteerReviewStatus::CategoryNotFound,
             "approval should report a missing category");
     const VolunteerRecord *unchanged =
@@ -695,16 +778,8 @@ void testVolunteerReviewReportsMissingRecordsAndCategories()
             "missing-category preview and approval should preserve status");
     requireNear(unchanged->getScore(), 7.0,
                 "missing-category preview and approval should preserve score");
-
-    const VolunteerReviewOutcome rejection =
-        service.reject("R_REVIEW_NO_CATEGORY_REJECT");
-    require(rejection.succeeded(),
-            "missing category should not prevent Pending record rejection");
-    const VolunteerRecord *rejected =
-        data.findRecord("R_REVIEW_NO_CATEGORY_REJECT");
-    require(rejected != nullptr &&
-                rejected->getStatus() == RecordStatus::Rejected,
-            "category-independent rejection should update the record state");
+    require(data.getOperationLogs().empty(),
+            "preview, missing record and missing category must not log");
 }
 
 OperationLog makeOperationLog(
@@ -834,26 +909,39 @@ void testOperationLogServiceQueriesAndGeneratesNextId()
         "2026-10-06T12:30:00"));
 
     OperationLogService service(data);
-    const vector<OperationLog> newestFirst = service.query();
+    const vector<OperationLogView> newestFirst = service.query();
     require(newestFirst.size() == 3 &&
-                newestFirst[0].getLogId() == "LOG000009" &&
-                newestFirst[1].getLogId() == "LOG000004" &&
-                newestFirst[2].getLogId() == "LOG000002",
+                newestFirst[0].logId == "LOG000009" &&
+                newestFirst[1].logId == "LOG000004" &&
+                newestFirst[2].logId == "LOG000002" &&
+                newestFirst[0].operatorAccountId == "A9001" &&
+                newestFirst[0].targetId == "R0009" &&
+                newestFirst[0].operationTime == "2026-10-06T13:00:00",
             "OperationLog query should return newest timestamps first");
 
-    const vector<OperationLog> approved =
-        service.query(OperationType::VolunteerRecordApproved);
+    OperationLogQuery approvedQuery;
+    approvedQuery.operationType =
+        OperationType::VolunteerRecordApproved;
+    const vector<OperationLogView> approved =
+        service.query(approvedQuery);
     require(approved.size() == 2 &&
-                approved[0].getLogId() == "LOG000004" &&
-                approved[1].getLogId() == "LOG000002",
+                approved[0].logId == "LOG000004" &&
+                approved[1].logId == "LOG000002",
             "operation type query should filter and retain newest-first order");
 
-    const vector<OperationLog> target = service.queryTarget(
-        OperationTargetType::VolunteerRecord,
-        "R0004");
+    OperationLogQuery targetQuery;
+    targetQuery.targetId = "R0004";
+    const vector<OperationLogView> target =
+        service.query(targetQuery);
     require(target.size() == 1 &&
-                target[0].getLogId() == "LOG000004",
+                target[0].logId == "LOG000004" &&
+                target[0].targetType ==
+                    OperationTargetType::VolunteerRecord,
             "target query should filter by target type and target ID");
+
+    targetQuery.operationType = OperationType::VolunteerRecordRejected;
+    require(service.query(targetQuery).empty(),
+            "combined type and target filters should be applied together");
     require(data.getRecords().empty(),
             "historical target queries should not require the target to resolve");
 
@@ -899,6 +987,89 @@ void testOperationLogIsRequiredForLoadAll()
     DataManager data(temporaryDirectory.path());
     require(!data.loadAll(),
             "missing required operation_logs.csv should fail loadAll");
+}
+
+void verifyReviewPersistenceFailureRestoresState(bool failPrepare)
+{
+    const string label = failPrepare
+                             ? "review_service_prepare_failure"
+                             : "review_service_commit_failure";
+    ScopedTemporaryDirectory temporaryDirectory(label);
+    createReviewRuntimeData(
+        temporaryDirectory.path(),
+        "R0001|S9001|C01|2026/10/01|1.00|Campus|Witness|Original|0|0.00\n");
+
+    DataManager data(temporaryDirectory.path());
+    require(data.loadAll(),
+            "synthetic files should load before injected save failure");
+    const string originalRecords =
+        readFile(temporaryDirectory.path() / "records.txt");
+    const string originalLogs =
+        readFile(temporaryDirectory.path() / "operation_logs.csv");
+
+    const filesystem::path blocker = temporaryDirectory.path() /
+        (failPrepare ? "operation_logs.csv.tmp" : "records.txt.bak");
+    filesystem::create_directory(blocker);
+
+    VolunteerReviewService service(data);
+    const VolunteerReviewOutcome outcome =
+        service.approve("A9001", "R0001");
+    require(outcome.status == VolunteerReviewStatus::PersistenceFailure,
+            "unchanged-file save failure should report PersistenceFailure");
+    const VolunteerRecord *restored = data.findRecord("R0001");
+    require(restored != nullptr &&
+                restored->getStatus() == RecordStatus::Pending &&
+                restored->getScore() == 0.0,
+            "ordinary save failure should restore the record from disk");
+    require(data.getOperationLogs().empty(),
+            "ordinary save failure should discard the uncommitted log in memory");
+    require(readFile(temporaryDirectory.path() / "records.txt") ==
+                originalRecords &&
+                readFile(temporaryDirectory.path() / "operation_logs.csv") ==
+                    originalLogs,
+            "ordinary save failure should leave both formal files unchanged");
+}
+
+void testReviewServiceRestoresAfterPrepareFailure()
+{
+    verifyReviewPersistenceFailureRestoresState(true);
+}
+
+void testReviewServiceRestoresAfterUnchangedCommitFailure()
+{
+    verifyReviewPersistenceFailureRestoresState(false);
+}
+
+void testReviewServiceReportsSeverePartialCommit()
+{
+    ScopedTemporaryDirectory temporaryDirectory(
+        "review_service_severe_partial");
+    createReviewRuntimeData(
+        temporaryDirectory.path(),
+        "R0001|S9001|C01|2026/10/01|1.00|Campus|Witness|Original|0|0.00\n");
+    DataManager data(temporaryDirectory.path());
+    require(data.loadAll(),
+            "synthetic files should load before partial-commit test");
+    const string originalRecords =
+        readFile(temporaryDirectory.path() / "records.txt");
+    const string originalLogs =
+        readFile(temporaryDirectory.path() / "operation_logs.csv");
+    filesystem::create_directory(
+        temporaryDirectory.path() / "operation_logs.csv.bak");
+
+    VolunteerReviewService service(data);
+    const VolunteerReviewOutcome outcome =
+        service.approve("A9001", "R0001");
+    require(outcome.status ==
+                VolunteerReviewStatus::SeverePersistenceFailure,
+            "partial formal commit must report severe persistence failure");
+    require(!outcome.succeeded(),
+            "partial formal commit must never report review success");
+    require(readFile(temporaryDirectory.path() / "records.txt") !=
+                originalRecords &&
+                readFile(temporaryDirectory.path() / "operation_logs.csv") ==
+                    originalLogs,
+            "severe partial commit test should preserve the primitive's ordered outcome");
 }
 
 void testReviewPersistencePrepareFailureLeavesBothFilesUnchanged()
@@ -1050,6 +1221,9 @@ int main()
         testOperationLogServiceQueriesAndGeneratesNextId();
         testHistoricalOperationLogTargetProtectsRecordId();
         testOperationLogIsRequiredForLoadAll();
+        testReviewServiceRestoresAfterPrepareFailure();
+        testReviewServiceRestoresAfterUnchangedCommitFailure();
+        testReviewServiceReportsSeverePartialCommit();
         testReviewPersistencePrepareFailureLeavesBothFilesUnchanged();
         testReviewPersistenceReportsOrderedSeverePartialCommit();
         testReviewPersistenceWritesAndReloadsBothFiles();

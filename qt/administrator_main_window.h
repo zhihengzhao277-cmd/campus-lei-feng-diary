@@ -15,6 +15,10 @@ class QPushButton;
 class QLabel;
 class QListWidget;
 class QStackedWidget;
+class QTableView;
+class QHBoxLayout;
+class OperationLogTableModel;
+enum class VolunteerReviewStatus;
 
 class AdministratorMainWindow : public QWidget
 {
@@ -37,6 +41,8 @@ private slots:
     void showSelectedRecordDetail();
     void approveSelectedRecord();
     void rejectSelectedRecord();
+    void refreshOperationLogPage();
+    void applyOperationLogFilter();
     void refreshStatisticsPage();
     void createStudent();
     void createAdministrator();
@@ -111,6 +117,13 @@ private:
     QLabel *profileNameLabel;
     QLabel *profileAccountLabel;
 
+    QWidget *operationLogPage;
+    QComboBox *operationLogTypeFilter;
+    QLineEdit *operationLogTargetIdEdit;
+    QTableView *operationLogTable;
+    QLabel *operationLogEmptyLabel;
+    OperationLogTableModel *operationLogModel;
+
     void buildInterface();
     void buildHomePage();
     void buildReviewPage();
@@ -118,6 +131,16 @@ private:
     void buildCreateStudentPage();
     void buildCreateAdministratorPage();
     void buildProfilePage();
+    void buildOperationLogPage();
+    QFrame *buildOperationLogFilterCard();
+    QFrame *buildOperationLogTableCard();
+    void addOperationLogTypeFilter(QHBoxLayout *layout);
+    void addOperationLogTargetFilter(QHBoxLayout *layout);
+    void configureOperationLogTable();
+    void connectOperationLogFilters(
+        QPushButton *clearButton,
+        QPushButton *refreshButton);
+    void showReviewFailure(VolunteerReviewStatus status);
 
     QString categoryName(
         const std::string &categoryId) const;

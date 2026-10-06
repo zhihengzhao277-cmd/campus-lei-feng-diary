@@ -1,9 +1,11 @@
 #include "administrator_main_window.h"
 #include "style_helper.h"
+#include "operation_log_table_model.h"
 
 #include <QAbstractItemView>
 #include <QColor>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QFrame>
 #include <QFont>
 #include <QFormLayout>
@@ -23,12 +25,16 @@
 #include <QStyleOptionViewItem>
 #include <QStyledItemDelegate>
 #include <QStackedWidget>
+#include <QTableView>
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QVBoxLayout>
 
+#include <utility>
+
 #include "administrator.h"
 #include "data_manager.h"
+#include "operation_log_service.h"
 #include "volunteer_record.h"
 #include "volunteer_review_service.h"
 
@@ -91,6 +97,42 @@ namespace
                text.contains('\n') ||
                text.contains('\r');
     }
+
+    QString reviewFailureMessage(VolunteerReviewStatus status)
+    {
+        switch (status)
+        {
+        case VolunteerReviewStatus::RecordNotFound:
+            return "所选志愿记录已不存在，请刷新后重试。";
+        case VolunteerReviewStatus::RecordNotPending:
+            return "该记录已不处于待审核状态，请刷新后重试。";
+        case VolunteerReviewStatus::CategoryNotFound:
+            return "该记录所属志愿类别不存在，无法完成审核。";
+        case VolunteerReviewStatus::Success:
+        case VolunteerReviewStatus::PersistenceFailure:
+        case VolunteerReviewStatus::SeverePersistenceFailure:
+            return "审核操作未能完成，请刷新后重试。";
+        }
+        return "审核操作未能完成，请刷新后重试。";
+    }
+
+    OperationLogQuery operationLogQueryFrom(
+        const QComboBox *typeFilter,
+        const QLineEdit *targetIdEdit)
+    {
+        OperationLogQuery query;
+        const int selectedType = typeFilter->currentData().toInt();
+        if (selectedType >= 0)
+        {
+            query.operationType = static_cast<OperationType>(selectedType);
+        }
+        const QString targetId = targetIdEdit->text().trimmed();
+        if (!targetId.isEmpty())
+        {
+            query.targetId = targetId.toStdString();
+        }
+        return query;
+    }
 }
 
 AdministratorMainWindow::AdministratorMainWindow(
@@ -144,7 +186,13 @@ AdministratorMainWindow::AdministratorMainWindow(
       administratorPasswordEdit(nullptr),
       profilePage(nullptr),
       profileNameLabel(nullptr),
-      profileAccountLabel(nullptr)
+      profileAccountLabel(nullptr),
+      operationLogPage(nullptr),
+      operationLogTypeFilter(nullptr),
+      operationLogTargetIdEdit(nullptr),
+      operationLogTable(nullptr),
+      operationLogEmptyLabel(nullptr),
+      operationLogModel(nullptr)
 {
     setWindowTitle(
         "校园雷锋日记 - 管理员端");
@@ -294,6 +342,9 @@ void AdministratorMainWindow::buildInterface()
     navigationList->addItem(
         "个人信息");
 
+    navigationList->addItem(
+        "操作日志");
+
     navigationList->setStyleSheet(
         StyleHelper::navigation());
 
@@ -306,6 +357,7 @@ void AdministratorMainWindow::buildInterface()
     buildCreateStudentPage();
     buildCreateAdministratorPage();
     buildProfilePage();
+    buildOperationLogPage();
 
     contentStack->addWidget(
         homePage);
@@ -324,6 +376,9 @@ void AdministratorMainWindow::buildInterface()
 
     contentStack->addWidget(
         profilePage);
+
+    contentStack->addWidget(
+        operationLogPage);
 
     bodyLayout->addWidget(
         navigationList);
@@ -585,6 +640,12 @@ void AdministratorMainWindow::
             profilePage);
 
         return;
+    }
+
+    if (row == 6)
+    {
+        refreshOperationLogPage();
+        contentStack->setCurrentWidget(operationLogPage);
     }
 }
 
@@ -1129,6 +1190,34 @@ void AdministratorMainWindow::showSelectedRecordDetail()
     reviewDetailFrame->show();
 }
 
+void AdministratorMainWindow::showReviewFailure(
+    VolunteerReviewStatus status)
+{
+    if (status == VolunteerReviewStatus::PersistenceFailure)
+    {
+        refreshReviewPage();
+        QMessageBox::warning(
+            this,
+            "保存失败",
+            "审核状态未能保存，系统已恢复到提交前状态。");
+        return;
+    }
+    if (status == VolunteerReviewStatus::SeverePersistenceFailure)
+    {
+        QMessageBox::critical(
+            this,
+            "数据保存严重错误",
+            "记录与审计日志可能未能完整保存。应用即将退出，请检查数据文件。");
+        QCoreApplication::exit(1);
+        return;
+    }
+
+    QMessageBox::warning(
+        this,
+        "审核失败",
+        reviewFailureMessage(status));
+}
+
 void AdministratorMainWindow::approveSelectedRecord()
 {
     if (dataManager == nullptr ||
@@ -1138,28 +1227,6 @@ void AdministratorMainWindow::approveSelectedRecord()
     }
 
     VolunteerReviewService reviewService(*dataManager);
-    const auto showReviewFailure = [this](
-                                       VolunteerReviewStatus status)
-    {
-        QString message;
-        switch (status)
-        {
-        case VolunteerReviewStatus::RecordNotFound:
-            message = "所选志愿记录已不存在，请刷新后重试。";
-            break;
-        case VolunteerReviewStatus::RecordNotPending:
-            message = "该记录已不处于待审核状态，请刷新后重试。";
-            break;
-        case VolunteerReviewStatus::CategoryNotFound:
-            message = "该记录所属志愿类别不存在，无法计算通过积分。";
-            break;
-        case VolunteerReviewStatus::Success:
-            message = "审核操作未能完成，请刷新后重试。";
-            break;
-        }
-        QMessageBox::warning(this, "审核失败", message);
-    };
-
     const VolunteerReviewOutcome preview =
         reviewService.previewApprovalScore(selectedRecordId);
     if (!preview.succeeded())
@@ -1198,17 +1265,16 @@ void AdministratorMainWindow::approveSelectedRecord()
     }
 
     const VolunteerReviewOutcome approval =
-        reviewService.approve(selectedRecordId);
+        reviewService.approve(accountId, selectedRecordId);
     if (!approval.succeeded())
     {
         showReviewFailure(approval.status);
         return;
     }
 
-    dataManager->saveRecords();
-
     refreshReviewPage();
     refreshHomePage();
+    refreshOperationLogPage();
 
     QMessageBox::information(
         this,
@@ -1242,38 +1308,200 @@ void AdministratorMainWindow::rejectSelectedRecord()
 
     VolunteerReviewService reviewService(*dataManager);
     const VolunteerReviewOutcome rejection =
-        reviewService.reject(selectedRecordId);
+        reviewService.reject(accountId, selectedRecordId);
     if (!rejection.succeeded())
     {
-        QString message;
-        switch (rejection.status)
-        {
-        case VolunteerReviewStatus::RecordNotFound:
-            message = "所选志愿记录已不存在，请刷新后重试。";
-            break;
-        case VolunteerReviewStatus::RecordNotPending:
-            message = "该记录已不处于待审核状态，请刷新后重试。";
-            break;
-        case VolunteerReviewStatus::CategoryNotFound:
-            message = "该记录所属志愿类别不存在。";
-            break;
-        case VolunteerReviewStatus::Success:
-            message = "审核操作未能完成，请刷新后重试。";
-            break;
-        }
-        QMessageBox::warning(this, "审核失败", message);
+        showReviewFailure(rejection.status);
         return;
     }
 
-    dataManager->saveRecords();
-
     refreshReviewPage();
     refreshHomePage();
+    refreshOperationLogPage();
 
     QMessageBox::information(
         this,
         "审核完成",
         "该志愿记录已驳回。");
+}
+
+void AdministratorMainWindow::buildOperationLogPage()
+{
+    operationLogPage = new QWidget;
+    operationLogPage->setObjectName(
+        "administratorOperationLogPage");
+    operationLogPage->setStyleSheet(
+        StyleHelper::administratorOperationLogPage());
+
+    QVBoxLayout *mainLayout = new QVBoxLayout(operationLogPage);
+    mainLayout->setContentsMargins(22, 20, 22, 22);
+    mainLayout->setSpacing(16);
+
+    QLabel *titleLabel = new QLabel("操作日志");
+    titleLabel->setObjectName("adminOperationLogTitle");
+    QLabel *subtitleLabel = new QLabel(
+        "查看管理员对志愿记录执行的审核操作及审计信息。");
+    subtitleLabel->setObjectName("adminOperationLogSubtitle");
+    mainLayout->addWidget(titleLabel);
+    mainLayout->addWidget(subtitleLabel);
+    mainLayout->addWidget(buildOperationLogFilterCard());
+    mainLayout->addWidget(buildOperationLogTableCard(), 1);
+    refreshOperationLogPage();
+}
+
+QFrame *AdministratorMainWindow::buildOperationLogFilterCard()
+{
+    QFrame *filterCard = new QFrame;
+    filterCard->setObjectName("adminOperationLogFilterCard");
+    QHBoxLayout *filterLayout = new QHBoxLayout(filterCard);
+    filterLayout->setContentsMargins(16, 14, 16, 14);
+    filterLayout->setSpacing(10);
+    addOperationLogTypeFilter(filterLayout);
+    addOperationLogTargetFilter(filterLayout);
+
+    QPushButton *clearButton = new QPushButton("清除筛选");
+    clearButton->setObjectName("adminOperationLogClearButton");
+    clearButton->setCursor(Qt::PointingHandCursor);
+    QPushButton *refreshButton = new QPushButton("查询 / 刷新");
+    refreshButton->setObjectName("adminOperationLogRefreshButton");
+    refreshButton->setCursor(Qt::PointingHandCursor);
+    filterLayout->addWidget(clearButton);
+    filterLayout->addWidget(refreshButton);
+    connectOperationLogFilters(clearButton, refreshButton);
+    return filterCard;
+}
+
+void AdministratorMainWindow::addOperationLogTypeFilter(
+    QHBoxLayout *layout)
+{
+    QLabel *label = new QLabel("操作类型");
+    label->setObjectName("adminOperationLogFieldLabel");
+    operationLogTypeFilter = new QComboBox;
+    operationLogTypeFilter->setObjectName(
+        "adminOperationLogTypeFilter");
+    operationLogTypeFilter->addItem("全部", -1);
+    operationLogTypeFilter->addItem(
+        "审核通过",
+        static_cast<int>(OperationType::VolunteerRecordApproved));
+    operationLogTypeFilter->addItem(
+        "审核驳回",
+        static_cast<int>(OperationType::VolunteerRecordRejected));
+    operationLogTypeFilter->setMinimumWidth(150);
+    layout->addWidget(label);
+    layout->addWidget(operationLogTypeFilter);
+}
+
+void AdministratorMainWindow::addOperationLogTargetFilter(
+    QHBoxLayout *layout)
+{
+    QLabel *label = new QLabel("目标编号");
+    label->setObjectName("adminOperationLogFieldLabel");
+    operationLogTargetIdEdit = new QLineEdit;
+    operationLogTargetIdEdit->setObjectName(
+        "adminOperationLogTargetFilter");
+    operationLogTargetIdEdit->setPlaceholderText("输入志愿记录编号");
+    operationLogTargetIdEdit->setMinimumWidth(190);
+    layout->addWidget(label);
+    layout->addWidget(operationLogTargetIdEdit, 1);
+}
+
+void AdministratorMainWindow::connectOperationLogFilters(
+    QPushButton *clearButton,
+    QPushButton *refreshButton)
+{
+    connect(
+        operationLogTypeFilter,
+        QOverload<int>::of(&QComboBox::currentIndexChanged),
+        this,
+        &AdministratorMainWindow::applyOperationLogFilter);
+    connect(
+        operationLogTargetIdEdit,
+        &QLineEdit::returnPressed,
+        this,
+        &AdministratorMainWindow::applyOperationLogFilter);
+    connect(
+        refreshButton,
+        &QPushButton::clicked,
+        this,
+        &AdministratorMainWindow::refreshOperationLogPage);
+    connect(
+        clearButton,
+        &QPushButton::clicked,
+        this,
+        [this]()
+        {
+            operationLogTypeFilter->setCurrentIndex(0);
+            operationLogTargetIdEdit->clear();
+            refreshOperationLogPage();
+        });
+}
+
+QFrame *AdministratorMainWindow::buildOperationLogTableCard()
+{
+    QFrame *tableCard = new QFrame;
+    tableCard->setObjectName("adminOperationLogTableCard");
+    QVBoxLayout *tableLayout = new QVBoxLayout(tableCard);
+    tableLayout->setContentsMargins(16, 14, 16, 16);
+    tableLayout->setSpacing(10);
+
+    QLabel *tableTitle = new QLabel("审核操作记录");
+    tableTitle->setObjectName("adminOperationLogSectionTitle");
+    tableLayout->addWidget(tableTitle);
+
+    configureOperationLogTable();
+    tableLayout->addWidget(operationLogTable, 1);
+    tableLayout->addWidget(operationLogEmptyLabel);
+    return tableCard;
+}
+
+void AdministratorMainWindow::configureOperationLogTable()
+{
+    operationLogModel = new OperationLogTableModel(this);
+    operationLogTable = new QTableView;
+    operationLogTable->setObjectName("adminOperationLogTable");
+    operationLogTable->setModel(operationLogModel);
+    operationLogTable->setEditTriggers(
+        QAbstractItemView::NoEditTriggers);
+    operationLogTable->setSelectionBehavior(
+        QAbstractItemView::SelectRows);
+    operationLogTable->setSelectionMode(
+        QAbstractItemView::SingleSelection);
+    operationLogTable->setAlternatingRowColors(true);
+    operationLogTable->setShowGrid(false);
+    operationLogTable->verticalHeader()->setVisible(false);
+    operationLogTable->verticalHeader()->setDefaultSectionSize(42);
+    operationLogTable->horizontalHeader()->setSectionResizeMode(
+        QHeaderView::ResizeToContents);
+    operationLogTable->horizontalHeader()->setSectionResizeMode(
+        6, QHeaderView::Stretch);
+    operationLogTable->setMinimumHeight(300);
+
+    operationLogEmptyLabel = new QLabel(
+        "当前暂无符合条件的操作日志");
+    operationLogEmptyLabel->setObjectName(
+        "adminOperationLogEmptyState");
+    operationLogEmptyLabel->setAlignment(Qt::AlignCenter);
+}
+
+void AdministratorMainWindow::applyOperationLogFilter()
+{
+    refreshOperationLogPage();
+}
+
+void AdministratorMainWindow::refreshOperationLogPage()
+{
+    if (dataManager == nullptr || operationLogModel == nullptr)
+    {
+        return;
+    }
+
+    OperationLogService service(*dataManager);
+    std::vector<OperationLogView> results = service.query(
+        operationLogQueryFrom(
+            operationLogTypeFilter,
+            operationLogTargetIdEdit));
+    operationLogEmptyLabel->setVisible(results.empty());
+    operationLogModel->setResults(std::move(results));
 }
 
 void AdministratorMainWindow::buildStatisticsPage()

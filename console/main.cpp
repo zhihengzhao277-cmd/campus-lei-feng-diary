@@ -1,5 +1,6 @@
 #include "data_manager.h"
 #include "student_volunteer_service.h"
+#include "volunteer_review_service.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -1247,7 +1248,37 @@ void showPendingRecords(const DataManager &data)
     }
 }
 
-void reviewRecord(DataManager &data)
+void reportReviewOutcome(
+    const VolunteerReviewOutcome &outcome,
+    bool approved)
+{
+    switch (outcome.status)
+    {
+    case VolunteerReviewStatus::Success:
+        cout << (approved ? "审核通过，积分已计算。\n"
+                          : "记录已驳回。\n");
+        return;
+    case VolunteerReviewStatus::RecordNotFound:
+        cout << "记录不存在，请刷新后重试。\n";
+        return;
+    case VolunteerReviewStatus::RecordNotPending:
+        cout << "该记录已经完成审核。\n";
+        return;
+    case VolunteerReviewStatus::CategoryNotFound:
+        cout << "志愿类别不存在，无法审核通过。\n";
+        return;
+    case VolunteerReviewStatus::PersistenceFailure:
+        cout << "审核未保存，系统已恢复到提交前状态。\n";
+        return;
+    case VolunteerReviewStatus::SeverePersistenceFailure:
+        cout << "记录与审计日志可能未完整保存，程序将退出。\n";
+        exit(EXIT_FAILURE);
+    }
+}
+
+void reviewRecord(
+    const string &administratorId,
+    DataManager &data)
 {
     cout << "\n===== 待审核志愿记录 =====\n";
 
@@ -1322,29 +1353,17 @@ void reviewRecord(DataManager &data)
 
     if (choice == 1)
     {
-        const VolunteerCategory *category =
-            data.findCategory(
-                record->getCategoryId());
-
-        if (category == nullptr)
-        {
-            cout << "志愿类别不存在。\n";
-            return;
-        }
-
-        double score =
-            category->calculateScore(
-                record->getDuration());
-
-        record->approve(score);
-
-        cout << "审核通过，积分已计算。\n";
+        VolunteerReviewService service(data);
+        reportReviewOutcome(
+            service.approve(administratorId, recordId),
+            true);
     }
     else if (choice == 2)
     {
-        record->reject();
-
-        cout << "记录已驳回。\n";
+        VolunteerReviewService service(data);
+        reportReviewOutcome(
+            service.reject(administratorId, recordId),
+            false);
     }
     else
     {
@@ -1352,7 +1371,6 @@ void reviewRecord(DataManager &data)
         return;
     }
 
-    data.saveRecords();
 }
 
 void showAllRecords(const DataManager &data)
@@ -1555,7 +1573,7 @@ void administratorSession(
         }
         else if (choice == 2)
         {
-            reviewRecord(data);
+            reviewRecord(administratorId, data);
         }
         else if (choice == 3)
         {

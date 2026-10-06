@@ -8,30 +8,41 @@ using namespace std;
 
 namespace
 {
-vector<const OperationLog *> newestFirst(
-    const vector<const OperationLog *> &matchingLogs)
+OperationLogView makeView(const OperationLog &log)
 {
-    vector<const OperationLog *> ordered = matchingLogs;
-    stable_sort(
-        ordered.begin(),
-        ordered.end(),
-        [](const OperationLog *left, const OperationLog *right)
-        {
-            return left->getOperationTime() > right->getOperationTime();
-        });
-    return ordered;
+    return {
+        log.getLogId(),
+        log.getOperatorAccountId(),
+        log.getOperationType(),
+        log.getTargetType(),
+        log.getTargetId(),
+        log.getDescription(),
+        log.getOperationTime()};
 }
 
-vector<OperationLog> copyLogs(
-    const vector<const OperationLog *> &ordered)
+bool matchesQuery(
+    const OperationLog &log,
+    const OperationLogQuery &query)
 {
-    vector<OperationLog> result;
-    result.reserve(ordered.size());
-    for (const OperationLog *log : ordered)
+    if (query.operationType.has_value() &&
+        log.getOperationType() != *query.operationType)
     {
-        result.push_back(*log);
+        return false;
     }
-    return result;
+    return !query.targetId.has_value() ||
+           (log.getTargetType() == OperationTargetType::VolunteerRecord &&
+            log.getTargetId() == *query.targetId);
+}
+
+void sortNewestFirst(vector<OperationLogView> &results)
+{
+    stable_sort(
+        results.begin(),
+        results.end(),
+        [](const OperationLogView &left, const OperationLogView &right)
+        {
+            return left.operationTime > right.operationTime;
+        });
 }
 }
 
@@ -59,42 +70,18 @@ OperationLog OperationLogService::append(
     return log;
 }
 
-vector<OperationLog> OperationLogService::query() const
+vector<OperationLogView> OperationLogService::query(
+    const OperationLogQuery &query) const
 {
-    vector<const OperationLog *> matchingLogs;
+    vector<OperationLogView> results;
     for (const OperationLog &log : dataManager_.getOperationLogs())
     {
-        matchingLogs.push_back(&log);
-    }
-    return copyLogs(newestFirst(matchingLogs));
-}
-
-vector<OperationLog> OperationLogService::query(
-    OperationType operationType) const
-{
-    vector<const OperationLog *> matchingLogs;
-    for (const OperationLog &log : dataManager_.getOperationLogs())
-    {
-        if (log.getOperationType() == operationType)
+        if (!matchesQuery(log, query))
         {
-            matchingLogs.push_back(&log);
+            continue;
         }
+        results.push_back(makeView(log));
     }
-    return copyLogs(newestFirst(matchingLogs));
-}
-
-vector<OperationLog> OperationLogService::queryTarget(
-    OperationTargetType targetType,
-    const string &targetId) const
-{
-    vector<const OperationLog *> matchingLogs;
-    for (const OperationLog &log : dataManager_.getOperationLogs())
-    {
-        if (log.getTargetType() == targetType &&
-            log.getTargetId() == targetId)
-        {
-            matchingLogs.push_back(&log);
-        }
-    }
-    return copyLogs(newestFirst(matchingLogs));
+    sortNewestFirst(results);
+    return results;
 }

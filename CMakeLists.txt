@@ -80,6 +80,9 @@ add_executable(
     qt/administrator_main_window.cpp
     qt/administrator_main_window.h
 
+    qt/operation_log_table_model.cpp
+    qt/operation_log_table_model.h
+
     qt/style_helper.cpp
     qt/style_helper.h
 

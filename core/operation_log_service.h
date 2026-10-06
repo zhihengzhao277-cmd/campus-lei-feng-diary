@@ -3,10 +3,28 @@
 
 #include "operation_log.h"
 
+#include <optional>
 #include <string>
 #include <vector>
 
 class DataManager;
+
+struct OperationLogView
+{
+    std::string logId;
+    std::string operatorAccountId;
+    OperationType operationType;
+    OperationTargetType targetType;
+    std::string targetId;
+    std::string description;
+    std::string operationTime;
+};
+
+struct OperationLogQuery
+{
+    std::optional<OperationType> operationType;
+    std::optional<std::string> targetId;
+};
 
 class OperationLogService
 {
@@ -20,11 +38,8 @@ public:
         const std::string &targetId,
         const std::string &description);
 
-    std::vector<OperationLog> query() const;
-    std::vector<OperationLog> query(OperationType operationType) const;
-    std::vector<OperationLog> queryTarget(
-        OperationTargetType targetType,
-        const std::string &targetId) const;
+    std::vector<OperationLogView> query(
+        const OperationLogQuery &query = {}) const;
 
 private:
     DataManager &dataManager_;

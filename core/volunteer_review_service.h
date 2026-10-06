@@ -11,7 +11,9 @@ enum class VolunteerReviewStatus
     Success,
     RecordNotFound,
     RecordNotPending,
-    CategoryNotFound
+    CategoryNotFound,
+    PersistenceFailure,
+    SeverePersistenceFailure
 };
 
 struct VolunteerReviewOutcome
@@ -34,9 +36,11 @@ public:
         const std::string &recordId) const;
 
     VolunteerReviewOutcome approve(
+        const std::string &operatorAccountId,
         const std::string &recordId);
 
     VolunteerReviewOutcome reject(
+        const std::string &operatorAccountId,
         const std::string &recordId);
 
 private:

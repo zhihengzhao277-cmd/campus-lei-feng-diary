@@ -1,10 +1,132 @@
 #include "data_manager.h"
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <iterator>
+#include <limits>
 #include <sstream>
+#include <stdexcept>
+#include <system_error>
 #include <utility>
 using namespace std;
+
+namespace
+{
+enum class FileReplaceState
+{
+    Success,
+    FailedUnchanged,
+    PartialFailure
+};
+
+bool writePreparedFile(
+    const filesystem::path &temporaryPath,
+    const string &contents,
+    string &errorMessage)
+{
+    error_code error;
+    if (filesystem::exists(temporaryPath, error) || error)
+    {
+        errorMessage = "temporary path already exists or cannot be checked";
+        return false;
+    }
+
+    ofstream file(temporaryPath, ios::binary | ios::out | ios::trunc);
+    if (!file.is_open())
+    {
+        errorMessage = "could not open temporary file for Prepare";
+        return false;
+    }
+
+    file.write(contents.data(), static_cast<streamsize>(contents.size()));
+    file.flush();
+    bool written = file.good();
+    file.close();
+    written = written && !file.fail();
+    if (!written)
+    {
+        error.clear();
+        filesystem::remove(temporaryPath, error);
+        errorMessage = "could not finish writing temporary file";
+        return false;
+    }
+    return true;
+}
+
+FileReplaceState replacePreparedFile(
+    const filesystem::path &temporaryPath,
+    const filesystem::path &formalPath,
+    const filesystem::path &backupPath)
+{
+    error_code error;
+    if (filesystem::exists(backupPath, error) || error)
+    {
+        return FileReplaceState::FailedUnchanged;
+    }
+
+    const bool hadFormalFile = filesystem::exists(formalPath, error);
+    if (error)
+    {
+        return FileReplaceState::FailedUnchanged;
+    }
+
+    if (hadFormalFile)
+    {
+        filesystem::rename(formalPath, backupPath, error);
+        if (error)
+        {
+            return FileReplaceState::FailedUnchanged;
+        }
+    }
+
+    error.clear();
+    filesystem::rename(temporaryPath, formalPath, error);
+    if (!error)
+    {
+        return FileReplaceState::Success;
+    }
+
+    if (hadFormalFile)
+    {
+        error_code restoreError;
+        filesystem::rename(backupPath, formalPath, restoreError);
+        if (restoreError)
+        {
+            return FileReplaceState::PartialFailure;
+        }
+    }
+    return FileReplaceState::FailedUnchanged;
+}
+
+void removeTemporaryFile(const filesystem::path &path)
+{
+    error_code error;
+    filesystem::remove(path, error);
+}
+
+string serializeRecords(const vector<VolunteerRecord> &records)
+{
+    ostringstream contents;
+    contents << fixed << setprecision(2);
+    for (const VolunteerRecord &record : records)
+    {
+        contents
+            << record.getRecordId() << "|"
+            << record.getStudentId() << "|"
+            << record.getCategoryId() << "|"
+            << record.getDate() << "|"
+            << record.getDuration() << "|"
+            << record.getPlace() << "|"
+            << record.getWitness() << "|"
+            << record.getDescription() << "|"
+            << static_cast<int>(record.getStatus()) << "|"
+            << record.getScore()
+            << '\n';
+    }
+    return contents.str();
+}
+}
 
 DataManager::DataManager()
     : DataManager(std::filesystem::path("data"))
@@ -47,7 +169,8 @@ bool DataManager::loadAll()
     return loadStudents() &&
            loadAdministrators() &&
            loadRecords() &&
-           loadDiaries();
+           loadDiaries() &&
+           loadOperationLogs();
 }
 /**
  * 保存所有数据的函数
@@ -202,6 +325,36 @@ bool DataManager::loadDiaries() /// AI大修
     return !file.bad();
 }
 
+bool DataManager::loadOperationLogs()
+{
+    ifstream file(dataRoot_ / "operation_logs.csv", ios::binary);
+    if (!file.is_open())
+    {
+        return false;
+    }
+
+    const string csv{
+        istreambuf_iterator<char>(file),
+        istreambuf_iterator<char>()};
+    if (file.bad())
+    {
+        return false;
+    }
+
+    vector<OperationLog> loadedLogs;
+    if (!OperationLogCsvCodec::parse(csv, loadedLogs))
+    {
+        return false;
+    }
+
+    operationLogs.clear();
+    for (const OperationLog &log : loadedLogs)
+    {
+        operationLogs.push_back(log);
+    }
+    return true;
+}
+
 void DataManager::saveStudents() const /// AI大修
 {
     ofstream file(dataRoot_ / "students.txt");
@@ -252,6 +405,74 @@ void DataManager::saveRecords() const /// AI大修
             << record.getScore()
             << '\n';
     }
+}
+
+RecordLogPersistenceOutcome
+DataManager::saveRecordsAndOperationLogs() const
+{
+    const filesystem::path recordsPath = dataRoot_ / "records.txt";
+    const filesystem::path logsPath = dataRoot_ / "operation_logs.csv";
+    const filesystem::path recordsTemporaryPath =
+        dataRoot_ / "records.txt.tmp";
+    const filesystem::path logsTemporaryPath =
+        dataRoot_ / "operation_logs.csv.tmp";
+    const filesystem::path recordsBackupPath =
+        dataRoot_ / "records.txt.bak";
+    const filesystem::path logsBackupPath =
+        dataRoot_ / "operation_logs.csv.bak";
+
+    string errorMessage;
+    if (!writePreparedFile(
+            recordsTemporaryPath, serializeRecords(records), errorMessage))
+    {
+        return {
+            RecordLogPersistenceStatus::PrepareFailure,
+            "records.txt Prepare failed: " + errorMessage};
+    }
+
+    if (!writePreparedFile(
+            logsTemporaryPath,
+            OperationLogCsvCodec::serialize(operationLogs),
+            errorMessage))
+    {
+        removeTemporaryFile(recordsTemporaryPath);
+        return {
+            RecordLogPersistenceStatus::PrepareFailure,
+            "operation_logs.csv Prepare failed: " + errorMessage};
+    }
+
+    const FileReplaceState recordsCommit = replacePreparedFile(
+        recordsTemporaryPath, recordsPath, recordsBackupPath);
+    if (recordsCommit == FileReplaceState::FailedUnchanged)
+    {
+        removeTemporaryFile(recordsTemporaryPath);
+        removeTemporaryFile(logsTemporaryPath);
+        return {
+            RecordLogPersistenceStatus::CommitFailure,
+            "records.txt Commit failed before a formal file changed"};
+    }
+    if (recordsCommit == FileReplaceState::PartialFailure)
+    {
+        removeTemporaryFile(recordsTemporaryPath);
+        removeTemporaryFile(logsTemporaryPath);
+        return {
+            RecordLogPersistenceStatus::SeverePartialCommit,
+            "records.txt replacement failed and its backup could not be restored"};
+    }
+
+    const FileReplaceState logsCommit = replacePreparedFile(
+        logsTemporaryPath, logsPath, logsBackupPath);
+    if (logsCommit != FileReplaceState::Success)
+    {
+        removeTemporaryFile(logsTemporaryPath);
+        return {
+            RecordLogPersistenceStatus::SeverePartialCommit,
+            "records.txt committed but operation_logs.csv Commit failed"};
+    }
+
+    removeTemporaryFile(recordsBackupPath);
+    removeTemporaryFile(logsBackupPath);
+    return {RecordLogPersistenceStatus::Success, ""};
 }
 
 void DataManager::saveDiaries() const /// AI大修
@@ -412,6 +633,31 @@ string DataManager::generateRecordId() const /// 我的思路，AI代写（strin
         }
     }
 
+    for (const OperationLog &log : operationLogs)
+    {
+        if (log.getTargetType() != OperationTargetType::VolunteerRecord)
+        {
+            continue;
+        }
+
+        const string &recordId = log.getTargetId();
+        if (recordId.size() > 1 && recordId[0] == 'R')
+        {
+            try
+            {
+                const int number = stoi(recordId.substr(1));
+                if (number > maxNumber)
+                {
+                    maxNumber = number;
+                }
+            }
+            catch (...)
+            {
+                // Ignore historical IDs that do not use the current sequence format.
+            }
+        }
+    }
+
     int newNumber = maxNumber + 1;
 
     stringstream stream;
@@ -423,6 +669,34 @@ string DataManager::generateRecordId() const /// 我的思路，AI代写（strin
         << newNumber;
 
     return stream.str();
+}
+
+string DataManager::generateOperationLogId() const
+{
+    unsigned long long maxSequence = 0;
+    for (const OperationLog &log : operationLogs)
+    {
+        unsigned long long sequence = 0;
+        if (parseOperationLogSequence(log.getLogId(), sequence) &&
+            sequence > maxSequence)
+        {
+            maxSequence = sequence;
+        }
+    }
+
+    if (maxSequence == numeric_limits<unsigned long long>::max())
+    {
+        throw overflow_error("OperationLog ID sequence is exhausted");
+    }
+
+    ostringstream stream;
+    stream << "LOG" << setw(6) << setfill('0') << maxSequence + 1;
+    return stream.str();
+}
+
+void DataManager::addOperationLog(const OperationLog &log)
+{
+    operationLogs.push_back(log);
 }
 string DataManager::generateDiaryId() const /// 我的思路，AI代写（stringstream）
 {
@@ -538,4 +812,8 @@ const vector<VolunteerCategory> &DataManager::getCategories() const
 const vector<VolunteerRecord> &DataManager::getRecords() const
 {
     return records;
+}
+const vector<OperationLog> &DataManager::getOperationLogs() const
+{
+    return operationLogs;
 }

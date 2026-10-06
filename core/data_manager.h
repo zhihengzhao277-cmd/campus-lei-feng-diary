@@ -7,6 +7,7 @@
 #include "volunteer_record.h"
 #include "data_list.h"
 #include "diary_post.h"
+#include "operation_log.h"
 
 #include <filesystem>
 #include <string>
@@ -21,6 +22,26 @@ struct RankingItem
     double score;
 };
 
+enum class RecordLogPersistenceStatus
+{
+    Success,
+    PrepareFailure,
+    CommitFailure,
+    SeverePartialCommit
+};
+
+struct RecordLogPersistenceOutcome
+{
+    RecordLogPersistenceStatus status =
+        RecordLogPersistenceStatus::Success;
+    std::string message;
+
+    bool succeeded() const
+    {
+        return status == RecordLogPersistenceStatus::Success;
+    }
+};
+
 class DataManager
 {
 private:
@@ -30,6 +51,7 @@ private:
     vector<Administrator> administrators;
     vector<VolunteerCategory> categories;
     vector<VolunteerRecord> records;
+    vector<OperationLog> operationLogs;
 
     DataList<DiaryPost> diaryPosts;
 
@@ -50,11 +72,14 @@ public:
     bool loadAdministrators();
     bool loadRecords();
     bool loadDiaries();
+    bool loadOperationLogs();
 
     void saveStudents() const;
     void saveAdministrators() const;
     void saveRecords() const;
     void saveDiaries() const;
+
+    RecordLogPersistenceOutcome saveRecordsAndOperationLogs() const;
 
     Student *findStudent(
         const string &accountId);
@@ -81,6 +106,9 @@ public:
         const Administrator &administrator);
 
     string generateRecordId() const;
+    string generateOperationLogId() const;
+
+    void addOperationLog(const OperationLog &log);
 
     double calculateStudentScore(
         const string &studentId) const;
@@ -107,6 +135,9 @@ public:
 
     const vector<VolunteerRecord> &
     getRecords() const;
+
+    const vector<OperationLog> &
+    getOperationLogs() const;
 
     void addDiary(
         const DiaryPost &diary);

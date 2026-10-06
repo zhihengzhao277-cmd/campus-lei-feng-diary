@@ -15,6 +15,7 @@ foreach(LEIFENG_DATA_FILE
     administrators.txt
     records.txt
     diaries.txt
+    operation_logs.csv
 )
     set(LEIFENG_RUNTIME_DATA_FILE
         "${LEIFENG_RUNTIME_DATA_DIR}/${LEIFENG_DATA_FILE}")
@@ -42,6 +43,10 @@ set(CORE_SOURCES
     core/diary_post.cpp
     core/diary_service.h
     core/diary_service.cpp
+    core/operation_log.h
+    core/operation_log.cpp
+    core/operation_log_service.h
+    core/operation_log_service.cpp
     core/data_manager.cpp
     core/student_volunteer_service.h
     core/student_volunteer_service.cpp

@@ -1,6 +1,7 @@
 #include "data_manager.h"
 #include "diary_service.h"
 #include "diary_post.h"
+#include "operation_log_service.h"
 #include "student_volunteer_service.h"
 #include "volunteer_category.h"
 #include "volunteer_record.h"
@@ -12,10 +13,12 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -90,6 +93,15 @@ void writeRuntimeFile(
     require(file.good(), "synthetic runtime file should be written");
 }
 
+string readFile(const filesystem::path &path)
+{
+    ifstream file(path, ios::binary);
+    require(file.is_open(), "synthetic runtime file should be readable");
+    return string(
+        istreambuf_iterator<char>(file),
+        istreambuf_iterator<char>());
+}
+
 void createSyntheticRuntimeData(const filesystem::path &root)
 {
     filesystem::create_directories(root);
@@ -109,6 +121,10 @@ void createSyntheticRuntimeData(const filesystem::path &root)
         root,
         "diaries.txt",
         "D9001|S9001|R9001|Synthetic diary|0|\n");
+    writeRuntimeFile(
+        root,
+        "operation_logs.csv",
+        "logId,operatorAccountId,operationType,targetType,targetId,description,operationTime\n");
 }
 
 void testDataManagerLoadsFromExplicitSyntheticRoot()
@@ -125,6 +141,8 @@ void testDataManagerLoadsFromExplicitSyntheticRoot()
             "explicit data root should load its administrator file");
     require(data.getRecords().size() == 1,
             "explicit data root should load its record file");
+    require(data.getOperationLogs().empty(),
+            "header-only OperationLog file should load as an empty collection");
     require(data.findDiaryByRecordId("R9001") != nullptr,
             "explicit data root should load its diary file");
 }
@@ -688,6 +706,322 @@ void testVolunteerReviewReportsMissingRecordsAndCategories()
                 rejected->getStatus() == RecordStatus::Rejected,
             "category-independent rejection should update the record state");
 }
+
+OperationLog makeOperationLog(
+    const string &logId,
+    OperationType operationType,
+    const string &targetId,
+    const string &description,
+    const string &operationTime)
+{
+    return OperationLog(
+        logId,
+        "A9001",
+        operationType,
+        OperationTargetType::VolunteerRecord,
+        targetId,
+        description,
+        operationTime);
+}
+
+void testOperationLogFieldsEnumsAndCsvRoundTrip()
+{
+    static_assert(
+        !is_assignable<OperationLog &, OperationLog>::value,
+        "OperationLog should not be assignable after construction");
+
+    const string description = "Approved, note: \"checked\"\r\nsecond line";
+    vector<OperationLog> original;
+    original.push_back(makeOperationLog(
+        "LOG000007",
+        OperationType::VolunteerRecordApproved,
+        "R_DELETED_TARGET",
+        description,
+        "2026-10-06T12:34:56"));
+    original.push_back(makeOperationLog(
+        "LOG000008",
+        OperationType::VolunteerRecordRejected,
+        "R0008",
+        "",
+        "2026-10-06T12:35:01"));
+
+    require(operationTypeToken(OperationType::VolunteerRecordApproved) ==
+                "VolunteerRecordApproved",
+            "approved operation type should use its stable CSV token");
+    require(operationTypeToken(OperationType::VolunteerRecordRejected) ==
+                "VolunteerRecordRejected",
+            "rejected operation type should use its stable CSV token");
+    OperationType parsedType = OperationType::VolunteerRecordRejected;
+    require(parseOperationTypeToken("VolunteerRecordApproved", parsedType) &&
+                parsedType == OperationType::VolunteerRecordApproved,
+            "approved operation type token should parse");
+    require(!parseOperationTypeToken("UnknownOperation", parsedType),
+            "unknown operation type token should fail parsing");
+    unsigned long long parsedSequence = 0;
+    require(!parseOperationLogSequence("LOG000000", parsedSequence),
+            "zero should not be accepted as a generated log sequence");
+    require(operationTargetTypeToken(OperationTargetType::VolunteerRecord) ==
+                "VolunteerRecord",
+            "target type should use its stable CSV token");
+
+    const string csv = OperationLogCsvCodec::serialize(original);
+    require(csv.rfind(
+                "logId,operatorAccountId,operationType,targetType,targetId,description,operationTime\n",
+                0) == 0,
+            "OperationLog CSV should begin with its fixed header");
+    vector<OperationLog> parsed;
+    require(OperationLogCsvCodec::parse(csv, parsed),
+            "valid OperationLog CSV should parse");
+    require(parsed.size() == 2,
+            "CSV round trip should preserve both audit facts");
+    require(parsed[0].getLogId() == "LOG000007" &&
+                parsed[0].getOperatorAccountId() == "A9001" &&
+                parsed[0].getOperationType() ==
+                    OperationType::VolunteerRecordApproved &&
+                parsed[0].getTargetType() ==
+                    OperationTargetType::VolunteerRecord &&
+                parsed[0].getTargetId() == "R_DELETED_TARGET" &&
+                parsed[0].getDescription() == description &&
+                parsed[0].getOperationTime() == "2026-10-06T12:34:56",
+            "CSV round trip should preserve immutable log field values");
+    require(parsed[1].getDescription().empty(),
+            "CSV round trip should preserve an allowed empty description");
+}
+
+void testOperationLogCsvRejectsDuplicateIdsWithoutPublishingPartialResults()
+{
+    const string csv =
+        "logId,operatorAccountId,operationType,targetType,targetId,description,operationTime\n"
+        "LOG000001,A9001,VolunteerRecordApproved,VolunteerRecord,R0001,first,2026-10-06T12:00:00\n"
+        "LOG000001,A9001,VolunteerRecordRejected,VolunteerRecord,R0002,second,2026-10-06T12:01:00\n";
+
+    vector<OperationLog> parsed;
+    parsed.push_back(makeOperationLog(
+        "LOG000099",
+        OperationType::VolunteerRecordApproved,
+        "R_EXISTING",
+        "existing output",
+        "2026-10-06T11:00:00"));
+
+    require(!OperationLogCsvCodec::parse(csv, parsed),
+            "valid CSV with duplicate log IDs should fail parsing");
+    require(parsed.size() == 1 &&
+                parsed[0].getLogId() == "LOG000099" &&
+                parsed[0].getTargetId() == "R_EXISTING",
+            "failed duplicate-ID parsing should leave output unchanged");
+}
+
+void testOperationLogServiceQueriesAndGeneratesNextId()
+{
+    DataManager data;
+    data.addOperationLog(makeOperationLog(
+        "LOG000002",
+        OperationType::VolunteerRecordApproved,
+        "R_MISSING_TARGET",
+        "first",
+        "2026-10-06T12:00:00"));
+    data.addOperationLog(makeOperationLog(
+        "LOG000009",
+        OperationType::VolunteerRecordRejected,
+        "R0009",
+        "second",
+        "2026-10-06T13:00:00"));
+    data.addOperationLog(makeOperationLog(
+        "LOG000004",
+        OperationType::VolunteerRecordApproved,
+        "R0004",
+        "third",
+        "2026-10-06T12:30:00"));
+
+    OperationLogService service(data);
+    const vector<OperationLog> newestFirst = service.query();
+    require(newestFirst.size() == 3 &&
+                newestFirst[0].getLogId() == "LOG000009" &&
+                newestFirst[1].getLogId() == "LOG000004" &&
+                newestFirst[2].getLogId() == "LOG000002",
+            "OperationLog query should return newest timestamps first");
+
+    const vector<OperationLog> approved =
+        service.query(OperationType::VolunteerRecordApproved);
+    require(approved.size() == 2 &&
+                approved[0].getLogId() == "LOG000004" &&
+                approved[1].getLogId() == "LOG000002",
+            "operation type query should filter and retain newest-first order");
+
+    const vector<OperationLog> target = service.queryTarget(
+        OperationTargetType::VolunteerRecord,
+        "R0004");
+    require(target.size() == 1 &&
+                target[0].getLogId() == "LOG000004",
+            "target query should filter by target type and target ID");
+    require(data.getRecords().empty(),
+            "historical target queries should not require the target to resolve");
+
+    const OperationLog appended = service.append(
+        "A9002",
+        OperationType::VolunteerRecordRejected,
+        OperationTargetType::VolunteerRecord,
+        "R_MISSING_TARGET",
+        "later action");
+    require(appended.getLogId() == "LOG000010",
+            "new log ID should be one greater than the maximum existing ID");
+    require(appended.getOperationTime().size() == 19 &&
+                appended.getOperationTime()[4] == '-' &&
+                appended.getOperationTime()[10] == 'T',
+            "appended log should use local YYYY-MM-DDTHH:MM:SS time format");
+}
+
+void testHistoricalOperationLogTargetProtectsRecordId()
+{
+    DataManager data;
+    data.addRecord(VolunteerRecord(
+        "R0004", "S9001", "C01", "2026/10/01", 1.0,
+        "Campus", "Witness", "Reviewed"));
+    require(data.deleteRecord("R0004"),
+            "synthetic record should be removable before testing history guard");
+    data.addOperationLog(makeOperationLog(
+        "LOG000001",
+        OperationType::VolunteerRecordApproved,
+        "R0004",
+        "reviewed then removed",
+        "2026-10-06T12:00:00"));
+
+    require(data.generateRecordId() == "R0005",
+            "historical VolunteerRecord target ID should not be reused");
+}
+
+void testOperationLogIsRequiredForLoadAll()
+{
+    ScopedTemporaryDirectory temporaryDirectory("missing_operation_logs");
+    createSyntheticRuntimeData(temporaryDirectory.path());
+    filesystem::remove(temporaryDirectory.path() / "operation_logs.csv");
+
+    DataManager data(temporaryDirectory.path());
+    require(!data.loadAll(),
+            "missing required operation_logs.csv should fail loadAll");
+}
+
+void testReviewPersistencePrepareFailureLeavesBothFilesUnchanged()
+{
+    ScopedTemporaryDirectory temporaryDirectory("review_prepare_failure");
+    const string originalRecords =
+        "R0001|S9001|C01|2026/10/01|1.00|Campus|Witness|Original|0|0.00\n";
+    const string originalLogs =
+        "logId,operatorAccountId,operationType,targetType,targetId,description,operationTime\n";
+    writeRuntimeFile(temporaryDirectory.path(), "records.txt", originalRecords);
+    writeRuntimeFile(
+        temporaryDirectory.path(), "operation_logs.csv", originalLogs);
+    filesystem::create_directory(
+        temporaryDirectory.path() / "operation_logs.csv.tmp");
+
+    DataManager data(temporaryDirectory.path());
+    data.addRecord(VolunteerRecord(
+        "R0001", "S9001", "C01", "2026/10/01", 1.0,
+        "Campus", "Witness", "Original", RecordStatus::Approved, 2.0));
+    data.addOperationLog(makeOperationLog(
+        "LOG000001",
+        OperationType::VolunteerRecordApproved,
+        "R0001",
+        "reviewed",
+        "2026-10-06T12:00:00"));
+
+    const RecordLogPersistenceOutcome result =
+        data.saveRecordsAndOperationLogs();
+    require(result.status == RecordLogPersistenceStatus::PrepareFailure,
+            "a second-file prepare failure should be reported before commit");
+    require(readFile(temporaryDirectory.path() / "records.txt") ==
+                originalRecords &&
+                readFile(temporaryDirectory.path() / "operation_logs.csv") ==
+                    originalLogs,
+            "prepare failure should leave both formal files byte-for-byte unchanged");
+    require(!filesystem::exists(
+                temporaryDirectory.path() / "records.txt.tmp"),
+            "prepare failure should clean the temporary file it created");
+}
+
+void testReviewPersistenceReportsOrderedSeverePartialCommit()
+{
+    ScopedTemporaryDirectory temporaryDirectory("review_partial_commit");
+    const string originalRecords =
+        "R0001|S9001|C01|2026/10/01|1.00|Campus|Witness|Original|0|0.00\n";
+    const string originalLogs =
+        "logId,operatorAccountId,operationType,targetType,targetId,description,operationTime\n";
+    writeRuntimeFile(temporaryDirectory.path(), "records.txt", originalRecords);
+    writeRuntimeFile(
+        temporaryDirectory.path(), "operation_logs.csv", originalLogs);
+    writeRuntimeFile(
+        temporaryDirectory.path(),
+        "operation_logs.csv.bak",
+        "reserved backup path\n");
+
+    DataManager data(temporaryDirectory.path());
+    data.addRecord(VolunteerRecord(
+        "R0001", "S9001", "C01", "2026/10/01", 1.0,
+        "Campus", "Witness", "Original", RecordStatus::Approved, 2.0));
+    data.addOperationLog(makeOperationLog(
+        "LOG000001",
+        OperationType::VolunteerRecordApproved,
+        "R0001",
+        "reviewed",
+        "2026-10-06T12:00:00"));
+
+    const RecordLogPersistenceOutcome result =
+        data.saveRecordsAndOperationLogs();
+    require(result.status == RecordLogPersistenceStatus::SeverePartialCommit,
+            "failure after the first formal replacement should be severe partial commit");
+    require(readFile(temporaryDirectory.path() / "records.txt") !=
+                originalRecords &&
+                readFile(temporaryDirectory.path() / "operation_logs.csv") ==
+                    originalLogs,
+            "records must commit before logs, which are the final participant");
+    require(filesystem::exists(
+                temporaryDirectory.path() / "records.txt.bak"),
+            "severe partial commit should preserve the prior records backup");
+}
+
+void testReviewPersistenceWritesAndReloadsBothFiles()
+{
+    ScopedTemporaryDirectory temporaryDirectory("review_commit_success");
+    writeRuntimeFile(
+        temporaryDirectory.path(),
+        "records.txt",
+        "R0001|S9001|C01|2026/10/01|1.00|Campus|Witness|Original|0|0.00\n");
+    writeRuntimeFile(
+        temporaryDirectory.path(),
+        "operation_logs.csv",
+        "logId,operatorAccountId,operationType,targetType,targetId,description,operationTime\n");
+
+    DataManager data(temporaryDirectory.path());
+    require(data.loadRecords() && data.loadOperationLogs(),
+            "synthetic review files should load before commit");
+    VolunteerRecord *record = data.findRecord("R0001");
+    require(record != nullptr, "synthetic review record should load");
+    record->approve(2.25);
+    data.addOperationLog(makeOperationLog(
+        "LOG000001",
+        OperationType::VolunteerRecordApproved,
+        "R0001",
+        "approved",
+        "2026-10-06T12:00:00"));
+
+    const RecordLogPersistenceOutcome result =
+        data.saveRecordsAndOperationLogs();
+    require(result.status == RecordLogPersistenceStatus::Success,
+            "both prepared files should commit successfully");
+
+    DataManager reloaded(temporaryDirectory.path());
+    require(reloaded.loadRecords() && reloaded.loadOperationLogs(),
+            "both committed files should reload");
+    require(reloaded.findRecord("R0001") != nullptr &&
+                reloaded.findRecord("R0001")->getStatus() ==
+                    RecordStatus::Approved &&
+                reloaded.findRecord("R0001")->getScore() == 2.25,
+            "records.txt should contain the committed review state");
+    require(reloaded.getOperationLogs().size() == 1 &&
+                reloaded.getOperationLogs()[0].getLogId() == "LOG000001" &&
+                reloaded.getOperationLogs()[0].getTargetId() == "R0001",
+            "operation_logs.csv should contain the matching audit fact");
+}
 }
 
 int main()
@@ -711,6 +1045,14 @@ int main()
         testDataManagerLoadsFromExplicitSyntheticRoot();
         testDataManagerReportsMissingRootOrRequiredFile();
         testExplicitDataRootIgnoresProcessWorkingDirectory();
+        testOperationLogFieldsEnumsAndCsvRoundTrip();
+        testOperationLogCsvRejectsDuplicateIdsWithoutPublishingPartialResults();
+        testOperationLogServiceQueriesAndGeneratesNextId();
+        testHistoricalOperationLogTargetProtectsRecordId();
+        testOperationLogIsRequiredForLoadAll();
+        testReviewPersistencePrepareFailureLeavesBothFilesUnchanged();
+        testReviewPersistenceReportsOrderedSeverePartialCommit();
+        testReviewPersistenceWritesAndReloadsBothFiles();
         cout << "All core characterization checks passed." << endl;
         return 0;
     }

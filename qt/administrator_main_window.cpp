@@ -6,6 +6,7 @@
 #include <QColor>
 #include <QComboBox>
 #include <QCoreApplication>
+#include <QDoubleSpinBox>
 #include <QFrame>
 #include <QFont>
 #include <QFormLayout>
@@ -21,6 +22,7 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSizePolicy>
+#include <QSignalBlocker>
 #include <QStyle>
 #include <QStyleOptionViewItem>
 #include <QStyledItemDelegate>
@@ -108,6 +110,12 @@ namespace
             return "该记录已不处于待审核状态，请刷新后重试。";
         case VolunteerReviewStatus::CategoryNotFound:
             return "该记录所属志愿类别不存在，无法完成审核。";
+        case VolunteerReviewStatus::InvalidFinalDuration:
+            return "最终服务时长必须大于 0，并以 0.5 小时为单位。";
+        case VolunteerReviewStatus::ReviewNoteRequired:
+            return "类别或时长发生修正时，请填写审核意见；驳回时请填写驳回原因。";
+        case VolunteerReviewStatus::InvalidReviewNote:
+            return "审核意见不能包含竖线或换行符。";
         case VolunteerReviewStatus::Success:
         case VolunteerReviewStatus::PersistenceFailure:
         case VolunteerReviewStatus::SeverePersistenceFailure:
@@ -163,7 +171,15 @@ AdministratorMainWindow::AdministratorMainWindow(
       detailWitnessLabel(nullptr),
       detailDescriptionLabel(nullptr),
       detailStatusLabel(nullptr),
+      detailReviewerLabel(nullptr),
       detailScoreLabel(nullptr),
+      detailFinalFactsLabel(nullptr),
+      detailReviewNoteLabel(nullptr),
+      reviewFinalCategoryCombo(nullptr),
+      reviewFinalDurationSpin(nullptr),
+      reviewNoteEdit(nullptr),
+      reviewPreviewScoreLabel(nullptr),
+      reviewInputsContainer(nullptr),
       approveButton(nullptr),
       rejectButton(nullptr),
       selectedRecordId(""),
@@ -833,7 +849,10 @@ void AdministratorMainWindow::buildReviewPage()
     detailWitnessLabel = new QLabel;
     detailDescriptionLabel = new QLabel;
     detailStatusLabel = new QLabel;
+    detailReviewerLabel = new QLabel;
     detailScoreLabel = new QLabel;
+    detailFinalFactsLabel = new QLabel;
+    detailReviewNoteLabel = new QLabel;
 
     for (QLabel *fieldLabel :
          {detailStudentLabel,
@@ -844,7 +863,10 @@ void AdministratorMainWindow::buildReviewPage()
           detailWitnessLabel,
           detailDescriptionLabel,
           detailStatusLabel,
-          detailScoreLabel})
+          detailReviewerLabel,
+          detailScoreLabel,
+          detailFinalFactsLabel,
+          detailReviewNoteLabel})
     {
         fieldLabel->setObjectName("adminReviewField");
     }
@@ -854,6 +876,8 @@ void AdministratorMainWindow::buildReviewPage()
     detailDescriptionLabel->setWordWrap(true);
     detailDescriptionLabel->setTextInteractionFlags(
         Qt::TextSelectableByMouse);
+    detailFinalFactsLabel->setWordWrap(true);
+    detailReviewNoteLabel->setWordWrap(true);
 
     QGridLayout *detailGrid = new QGridLayout;
     detailGrid->setHorizontalSpacing(20);
@@ -874,7 +898,58 @@ void AdministratorMainWindow::buildReviewPage()
         2);
     detailGrid->addWidget(detailStatusLabel, 4, 0);
     detailGrid->addWidget(detailScoreLabel, 4, 1);
+    detailGrid->addWidget(detailFinalFactsLabel, 5, 0, 1, 2);
+    detailGrid->addWidget(detailReviewerLabel, 6, 0, 1, 2);
+    detailGrid->addWidget(detailReviewNoteLabel, 7, 0, 1, 2);
     detailLayout->addLayout(detailGrid);
+
+    reviewInputsContainer = new QWidget;
+    reviewInputsContainer->setObjectName(
+        "adminReviewInputsContainer");
+    QFormLayout *reviewInputLayout = new QFormLayout(
+        reviewInputsContainer);
+    reviewInputLayout->setHorizontalSpacing(16);
+    reviewInputLayout->setVerticalSpacing(10);
+
+    reviewFinalCategoryCombo = new QComboBox;
+    reviewFinalCategoryCombo->setObjectName(
+        "adminReviewFinalCategory");
+    reviewFinalCategoryCombo->setMinimumHeight(38);
+    if (dataManager != nullptr)
+    {
+        for (const VolunteerCategory &category :
+             dataManager->getCategories())
+        {
+            reviewFinalCategoryCombo->addItem(
+                QString::fromStdString(category.getName()),
+                QString::fromStdString(category.getCategoryId()));
+        }
+    }
+
+    reviewFinalDurationSpin = new QDoubleSpinBox;
+    reviewFinalDurationSpin->setObjectName(
+        "adminReviewFinalDuration");
+    reviewFinalDurationSpin->setRange(0.0, 10000.0);
+    reviewFinalDurationSpin->setDecimals(2);
+    reviewFinalDurationSpin->setSingleStep(0.5);
+    reviewFinalDurationSpin->setSuffix(" 小时");
+    reviewFinalDurationSpin->setMinimumHeight(38);
+
+    reviewNoteEdit = new QLineEdit;
+    reviewNoteEdit->setObjectName("adminReviewNote");
+    reviewNoteEdit->setPlaceholderText(
+        "修正类别/时长时必填；驳回时填写驳回原因");
+    reviewNoteEdit->setMinimumHeight(38);
+
+    reviewPreviewScoreLabel = new QLabel("预估积分：—");
+    reviewPreviewScoreLabel->setObjectName(
+        "adminReviewPreviewScore");
+
+    reviewInputLayout->addRow("最终类别", reviewFinalCategoryCombo);
+    reviewInputLayout->addRow("最终时长", reviewFinalDurationSpin);
+    reviewInputLayout->addRow("审核意见 / 驳回原因", reviewNoteEdit);
+    reviewInputLayout->addRow("审核预览", reviewPreviewScoreLabel);
+    detailLayout->addWidget(reviewInputsContainer);
 
     QHBoxLayout *actionLayout = new QHBoxLayout;
     actionLayout->addStretch(1);
@@ -936,6 +1011,22 @@ void AdministratorMainWindow::buildReviewPage()
         this,
         &AdministratorMainWindow::
             rejectSelectedRecord);
+
+    connect(
+        reviewFinalCategoryCombo,
+        QOverload<int>::of(&QComboBox::currentIndexChanged),
+        this,
+        &AdministratorMainWindow::updateReviewPreview);
+    connect(
+        reviewFinalDurationSpin,
+        QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+        this,
+        &AdministratorMainWindow::updateReviewPreview);
+    connect(
+        reviewNoteEdit,
+        &QLineEdit::textChanged,
+        this,
+        &AdministratorMainWindow::updateReviewPreview);
 
     refreshReviewPage();
 }
@@ -1015,7 +1106,7 @@ void AdministratorMainWindow::refreshReviewPage()
             2,
             new QTableWidgetItem(
                 categoryName(
-                    record.getCategoryId())));
+                    record.getAppliedCategoryId())));
 
         reviewTable->setItem(
             row,
@@ -1032,9 +1123,9 @@ void AdministratorMainWindow::refreshReviewPage()
             4,
             new QTableWidgetItem(
                 QString::number(
-                    record.getDuration(),
-                    'f',
-                    1) +
+                    record.getAppliedDuration(),
+                    'g',
+                    15) +
                 " 小时"));
         reviewTable->item(row, 4)->setTextAlignment(
             Qt::AlignCenter);
@@ -1122,8 +1213,8 @@ void AdministratorMainWindow::showSelectedRecordDetail()
         "学生：" + studentText);
 
     detailCategoryLabel->setText(
-        "志愿类别：" +
-        categoryName(record->getCategoryId()));
+        "学生申请类别：" +
+        categoryName(record->getAppliedCategoryId()));
 
     detailDateLabel->setText(
         "服务日期：" +
@@ -1133,9 +1224,9 @@ void AdministratorMainWindow::showSelectedRecordDetail()
     detailDurationLabel->setText(
         "服务时长：" +
         QString::number(
-            record->getDuration(),
-            'f',
-            1) +
+            record->getAppliedDuration(),
+            'g',
+            15) +
         " 小时");
 
     detailPlaceLabel->setText(
@@ -1164,30 +1255,146 @@ void AdministratorMainWindow::showSelectedRecordDetail()
     detailStatusLabel->style()->polish(
         detailStatusLabel);
 
+    detailReviewerLabel->hide();
+    if (record->getStatus() == RecordStatus::Approved ||
+        record->getStatus() == RecordStatus::Rejected)
+    {
+        if (record->getReviewerAccountId().has_value())
+        {
+            detailReviewerLabel->setText(
+                "审核人：" + QString::fromStdString(
+                    *record->getReviewerAccountId()));
+            detailReviewerLabel->show();
+        }
+        else if (record->isLegacyCompatibilityRecord())
+        {
+            detailReviewerLabel->setText(
+                "审核人：历史记录未保存");
+            detailReviewerLabel->show();
+        }
+    }
+
     if (record->getStatus() ==
         RecordStatus::Approved)
     {
         detailScoreLabel->setText(
-            "获得积分：" +
-            QString::number(
-                record->getScore(),
-                'f',
-                2));
+            "最终积分：" + QString::number(
+                record->getFinalScore().value_or(0.0), 'f', 1));
 
+        detailFinalFactsLabel->setText(
+            "最终类别：" + categoryName(
+                record->getFinalCategoryId().value_or(
+                    record->getAppliedCategoryId())) +
+            "；最终时长：" + QString::number(
+                record->getFinalDuration().value_or(
+                    record->getAppliedDuration()), 'g', 15) +
+            " 小时");
+        detailFinalFactsLabel->show();
         detailScoreLabel->show();
+
+        if (record->getReviewNote().has_value())
+        {
+            detailReviewNoteLabel->setText(
+                "审核意见：" + QString::fromStdString(
+                    *record->getReviewNote()));
+            detailReviewNoteLabel->show();
+        }
+        else
+        {
+            detailReviewNoteLabel->hide();
+        }
+    }
+    else if (record->getStatus() == RecordStatus::Rejected)
+    {
+        detailFinalFactsLabel->hide();
+        detailScoreLabel->hide();
+        if (record->getReviewNote().has_value())
+        {
+            detailReviewNoteLabel->setText(
+                "驳回原因：" + QString::fromStdString(
+                    *record->getReviewNote()));
+            detailReviewNoteLabel->show();
+        }
+        else if (record->isLegacyCompatibilityRecord())
+        {
+            detailReviewNoteLabel->setText(
+                "历史记录未保存审核意见");
+            detailReviewNoteLabel->show();
+        }
+        else
+        {
+            detailReviewNoteLabel->hide();
+        }
     }
     else
     {
+        detailFinalFactsLabel->hide();
         detailScoreLabel->hide();
+        detailReviewNoteLabel->hide();
     }
 
     bool canReview =
         record->getStatus() ==
         RecordStatus::Pending;
 
+    {
+        const QSignalBlocker categoryBlocker(reviewFinalCategoryCombo);
+        const QSignalBlocker durationBlocker(reviewFinalDurationSpin);
+        const QSignalBlocker noteBlocker(reviewNoteEdit);
+        const int categoryIndex = reviewFinalCategoryCombo->findData(
+            QString::fromStdString(record->getAppliedCategoryId()));
+        reviewFinalCategoryCombo->setCurrentIndex(categoryIndex);
+        reviewFinalDurationSpin->setValue(record->getAppliedDuration());
+        reviewNoteEdit->clear();
+    }
+    reviewInputsContainer->setVisible(canReview);
+
     approveButton->setVisible(canReview);
     rejectButton->setVisible(canReview);
     reviewDetailFrame->show();
+    if (canReview)
+    {
+        updateReviewPreview();
+    }
+}
+
+void AdministratorMainWindow::updateReviewPreview()
+{
+    if (dataManager == nullptr || selectedRecordId.empty() ||
+        reviewFinalCategoryCombo == nullptr ||
+        reviewFinalCategoryCombo->currentIndex() < 0)
+    {
+        if (reviewPreviewScoreLabel != nullptr)
+        {
+            reviewPreviewScoreLabel->setText("预估积分：—");
+        }
+        return;
+    }
+
+    VolunteerApprovalInput input;
+    input.finalCategoryId = reviewFinalCategoryCombo->currentData()
+                                .toString().toStdString();
+    input.finalDuration = reviewFinalDurationSpin->value();
+    input.reviewNote = reviewNoteEdit->text().toStdString();
+
+    VolunteerReviewService service(*dataManager);
+    const VolunteerReviewOutcome preview =
+        service.previewApproval(selectedRecordId, input);
+    if (preview.succeeded() && preview.approvalScore.has_value())
+    {
+        reviewPreviewScoreLabel->setText(
+            "预估积分：" + QString::number(
+                *preview.approvalScore, 'f', 1));
+    }
+    else if (preview.status == VolunteerReviewStatus::ReviewNoteRequired)
+    {
+        reviewPreviewScoreLabel->setText("预估积分：修正时请填写审核意见");
+    }
+    else
+    {
+        reviewPreviewScoreLabel->setText(
+            "预估积分：" + reviewFailureMessage(preview.status));
+    }
 }
 
 void AdministratorMainWindow::showReviewFailure(
@@ -1226,9 +1433,20 @@ void AdministratorMainWindow::approveSelectedRecord()
         return;
     }
 
+    if (reviewFinalCategoryCombo->currentIndex() < 0)
+    {
+        QMessageBox::warning(this, "审核失败", "请选择有效的最终类别。");
+        return;
+    }
+    VolunteerApprovalInput input;
+    input.finalCategoryId = reviewFinalCategoryCombo->currentData()
+                                .toString().toStdString();
+    input.finalDuration = reviewFinalDurationSpin->value();
+    input.reviewNote = reviewNoteEdit->text().toStdString();
+
     VolunteerReviewService reviewService(*dataManager);
     const VolunteerReviewOutcome preview =
-        reviewService.previewApprovalScore(selectedRecordId);
+        reviewService.previewApproval(selectedRecordId, input);
     if (!preview.succeeded())
     {
         showReviewFailure(preview.status);
@@ -1254,7 +1472,7 @@ void AdministratorMainWindow::approveSelectedRecord()
                 QString::number(
                     *preview.approvalScore,
                     'f',
-                    2),
+                    1),
             QMessageBox::Yes |
                 QMessageBox::No,
             QMessageBox::No);
@@ -1265,7 +1483,7 @@ void AdministratorMainWindow::approveSelectedRecord()
     }
 
     const VolunteerReviewOutcome approval =
-        reviewService.approve(accountId, selectedRecordId);
+        reviewService.approve(accountId, selectedRecordId, input);
     if (!approval.succeeded())
     {
         showReviewFailure(approval.status);
@@ -1290,13 +1508,26 @@ void AdministratorMainWindow::rejectSelectedRecord()
         return;
     }
 
+    const QString reason = reviewNoteEdit->text().trimmed();
+    if (reason.isEmpty())
+    {
+        QMessageBox::warning(this, "无法驳回", "请填写非空的驳回原因。");
+        return;
+    }
+    if (containsInvalidPersistenceCharacter(reason))
+    {
+        QMessageBox::warning(
+            this, "无法驳回", "驳回原因不能包含竖线或换行符。");
+        return;
+    }
+
     QMessageBox::StandardButton result =
         QMessageBox::question(
             this,
             "确认驳回",
             "确定驳回记录 " +
                 QString::fromStdString(selectedRecordId) +
-                " 吗？",
+                " 吗？\n\n驳回原因：" + reason,
             QMessageBox::Yes |
                 QMessageBox::No,
             QMessageBox::No);
@@ -1308,7 +1539,8 @@ void AdministratorMainWindow::rejectSelectedRecord()
 
     VolunteerReviewService reviewService(*dataManager);
     const VolunteerReviewOutcome rejection =
-        reviewService.reject(accountId, selectedRecordId);
+        reviewService.reject(
+            accountId, selectedRecordId, reason.toStdString());
     if (!rejection.succeeded())
     {
         showReviewFailure(rejection.status);
@@ -1701,19 +1933,25 @@ void AdministratorMainWindow::refreshStatisticsPage()
         }
 
         ++approvedCount;
-        totalDuration += record.getDuration();
+        const std::string finalCategoryId =
+            record.getFinalCategoryId().value_or(
+                record.getAppliedCategoryId());
+        const double finalDuration = record.getFinalDuration().value_or(
+            record.getAppliedDuration());
+        const double finalScore = record.getFinalScore().value_or(0.0);
+        totalDuration += finalDuration;
 
         int index = -1;
 
-        if (record.getCategoryId() == "C01")
+        if (finalCategoryId == "C01")
         {
             index = 0;
         }
-        else if (record.getCategoryId() == "C02")
+        else if (finalCategoryId == "C02")
         {
             index = 1;
         }
-        else if (record.getCategoryId() == "C03")
+        else if (finalCategoryId == "C03")
         {
             index = 2;
         }
@@ -1721,10 +1959,8 @@ void AdministratorMainWindow::refreshStatisticsPage()
         if (index >= 0)
         {
             ++categoryCount[index];
-            categoryDuration[index] +=
-                record.getDuration();
-            categoryScore[index] +=
-                record.getScore();
+            categoryDuration[index] += finalDuration;
+            categoryScore[index] += finalScore;
         }
     }
 
@@ -1782,7 +2018,7 @@ void AdministratorMainWindow::refreshStatisticsPage()
                 QString::number(
                     categoryScore[i],
                     'f',
-                    2)));
+                    1)));
     }
 
     statisticsRankingTable->setRowCount(0);
@@ -1827,7 +2063,7 @@ void AdministratorMainWindow::refreshStatisticsPage()
                 QString::number(
                     item.score,
                     'f',
-                    2)));
+                    1)));
     }
 }
 

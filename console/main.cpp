@@ -1267,6 +1267,15 @@ void reportReviewOutcome(
     case VolunteerReviewStatus::CategoryNotFound:
         cout << "志愿类别不存在，无法审核通过。\n";
         return;
+    case VolunteerReviewStatus::InvalidFinalDuration:
+        cout << "最终服务时长必须大于 0，并以 0.5 小时为单位。\n";
+        return;
+    case VolunteerReviewStatus::ReviewNoteRequired:
+        cout << "此操作需要填写审核意见或驳回原因。\n";
+        return;
+    case VolunteerReviewStatus::InvalidReviewNote:
+        cout << "审核意见不能包含竖线或换行符。\n";
+        return;
     case VolunteerReviewStatus::PersistenceFailure:
         cout << "审核未保存，系统已恢复到提交前状态。\n";
         return;
@@ -1354,15 +1363,21 @@ void reviewRecord(
     if (choice == 1)
     {
         VolunteerReviewService service(data);
+        const VolunteerApprovalInput input{
+            record->getAppliedCategoryId(),
+            record->getAppliedDuration(),
+            ""};
         reportReviewOutcome(
-            service.approve(administratorId, recordId),
+            service.approve(administratorId, recordId, input),
             true);
     }
     else if (choice == 2)
     {
+        const string reviewNote =
+            readText("请输入驳回原因：");
         VolunteerReviewService service(data);
         reportReviewOutcome(
-            service.reject(administratorId, recordId),
+            service.reject(administratorId, recordId, reviewNote),
             false);
     }
     else

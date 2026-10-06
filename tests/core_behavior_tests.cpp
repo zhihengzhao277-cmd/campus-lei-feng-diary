@@ -7,6 +7,7 @@
 #include "volunteer_record.h"
 #include "volunteer_review_service.h"
 
+#include <algorithm>
 #include <cmath>
 #include <chrono>
 #include <exception>
@@ -208,6 +209,14 @@ void requireNear(double actual, double expected, const string &message)
     }
 }
 
+VolunteerApprovalInput makeApprovalInput(
+    const string &categoryId,
+    double duration,
+    const string &reviewNote = "")
+{
+    return {categoryId, duration, reviewNote};
+}
+
 VolunteerRecord makeRecord(
     const string &recordId,
     const string &studentId,
@@ -217,17 +226,36 @@ VolunteerRecord makeRecord(
     RecordStatus status,
     double score)
 {
-    return VolunteerRecord(
-        recordId,
-        studentId,
-        categoryId,
-        date,
-        duration,
-        "Campus",
-        "Witness",
-        "Synthetic test record",
-        status,
-        score);
+    if (status == RecordStatus::Pending)
+    {
+        return VolunteerRecord(
+            recordId,
+            studentId,
+            categoryId,
+            date,
+            duration,
+            "Campus",
+            "Witness",
+            "Synthetic test record");
+    }
+
+    std::optional<VolunteerRecord> legacy =
+        VolunteerRecord::fromLegacyFields(
+            recordId,
+            studentId,
+            categoryId,
+            date,
+            duration,
+            "Campus",
+            "Witness",
+            "Synthetic test record",
+            status,
+            score);
+    if (!legacy.has_value())
+    {
+        throw runtime_error("legacy synthetic record should be constructible");
+    }
+    return std::move(*legacy);
 }
 
 void testVolunteerCategoryScores()
@@ -251,15 +279,25 @@ void testVolunteerRecordTransitions()
     require(pending.getStatus() == RecordStatus::Pending, "new record should start Pending");
 
     VolunteerRecord approved("R0002", "S0001", "C01", "2026-03-01", 1.0, "Campus", "Witness", "Test");
-    approved.approve(4.25);
+    require(approved.approve("A0001", "C02", 1.5, 1.5, 2.3, "调整时长"),
+            "valid approval should transition Pending to Approved");
     require(approved.getStatus() == RecordStatus::Approved, "approve should set Approved state");
-    requireNear(approved.getScore(), 4.25, "approve should store the supplied score");
+    require(approved.getAppliedCategoryId() == "C01" &&
+                approved.getFinalCategoryId() == "C02",
+            "approval should preserve application category and store final category");
+    requireNear(*approved.getFinalScore(), 2.3,
+                "approve should store the normalized final score");
 
     VolunteerRecord rejected("R0003", "S0001", "C01", "2026-03-01", 1.0, "Campus", "Witness", "Test");
-    rejected.reject();
+    require(rejected.reject("A0001", "需要补充证明"),
+            "valid rejection should transition Pending to Rejected");
     require(rejected.getStatus() == RecordStatus::Rejected, "reject should set Rejected state");
-    rejected.resubmit();
+    require(rejected.resubmit(), "Rejected record should resubmit to Pending");
     require(rejected.getStatus() == RecordStatus::Pending, "resubmit should return Rejected record to Pending");
+    require(!rejected.getReviewerAccountId().has_value() &&
+                !rejected.getReviewNote().has_value() &&
+                !rejected.getFinalScore().has_value(),
+            "resubmit should clear current review and settlement fields");
 }
 
 void testDataManagerDerivedQueries()
@@ -276,8 +314,8 @@ void testDataManagerDerivedQueries()
     data.addRecord(makeRecord("R0005", "S0001", "C01", "2026-04-01", 0.5, RecordStatus::Approved, 1.0));
     data.addRecord(makeRecord("R0006", "S0002", "C01", "2026-03-10", 5.0, RecordStatus::Approved, 10.0));
 
-    requireNear(data.calculateStudentScore("S0001"), 7.25, "total score should include only approved records for the student");
-    requireNear(data.calculateStudentScoreByDateRange("S0001", "2026-03-01", "2026-03-31"), 6.25, "date-range score should include only matching approved records");
+    requireNear(data.calculateStudentScore("S0001"), 7.3, "total score should include only approved records for the student and expose one decimal");
+    requireNear(data.calculateStudentScoreByDateRange("S0001", "2026-03-01", "2026-03-31"), 6.3, "date-range score should include only matching approved records and expose one decimal");
     requireNear(data.calculateStudentDurationByCategory("S0001", "C01"), 2.5, "category duration should include only approved records for the student");
 
     const vector<RankingItem> ranking = data.generateRanking();
@@ -305,9 +343,14 @@ void testDiaryServicePublishesOnlyApprovedPostsWithRecordOwnerFacts()
     data.addStudent(Student("S_OTHER", "Other Owner", "unused", "Class B", "Major B"));
     data.addStudent(Student("S_LEGACY", "Legacy Publisher", "unused", "Class C", "Major C"));
 
-    data.addRecord(makeRecord(
-        "R_OWNER", "S_OWNER", "C01", "2026/05/01", 1.5,
-        RecordStatus::Approved, 3.0));
+    auto correctedOwnerRecord = VolunteerRecord::fromModernFields(
+        "R_OWNER", "S_OWNER", "2026/05/01", "C01", 1.5,
+        "Campus", "Witness", "Synthetic test record",
+        RecordStatus::Approved, string("C02"), 2.0,
+        string("A9001"), string("审核修正"), 1.5, 3.0);
+    require(correctedOwnerRecord.has_value(),
+            "corrected approved fixture should satisfy modern invariants");
+    data.addRecord(*correctedOwnerRecord);
     data.addRecord(makeRecord(
         "R_PENDING", "S_OTHER", "C02", "2026/05/02", 2.0,
         RecordStatus::Pending, 0.0));
@@ -337,12 +380,12 @@ void testDiaryServicePublishesOnlyApprovedPostsWithRecordOwnerFacts()
             "public author account should come from the linked record owner, not legacy diary student ID");
     require(feed[0].authorName == "Record Owner",
             "public author name should come from the linked record owner");
-    require(feed[0].categoryName == "劳动服务",
-            "public category should expose its display name");
+    require(feed[0].categoryName == "环保服务",
+            "public category should use the final reviewed category");
     require(feed[0].serviceDate == "2026/05/01",
             "public service date should come from the linked record");
-    requireNear(feed[0].durationHours, 1.5,
-                "public duration should come from the linked record");
+    requireNear(feed[0].durationHours, 2.0,
+                "public duration should use the final reviewed duration");
     require(feed[0].place == "Campus",
             "public place should come from the linked record");
     require(feed[0].content == "First approved post",
@@ -567,9 +610,9 @@ void testVolunteerReviewPreviewAndApprovalUseCurrentCategoryScore()
         "review_approval_audit");
     createReviewRuntimeData(
         temporaryDirectory.path(),
-        "R_REVIEW_C01|S9001|C01|2026/06/01|1.75|Campus|Witness|Synthetic|0|0.00\n"
-        "R_REVIEW_C02|S9001|C02|2026/06/01|1.75|Campus|Witness|Synthetic|0|0.00\n"
-        "R_REVIEW_C03|S9001|C03|2026/06/01|1.75|Campus|Witness|Synthetic|0|0.00\n");
+        "R_REVIEW_C01|S9001|C01|2026/06/01|1.50|Campus|Witness|Synthetic|0|0.00\n"
+        "R_REVIEW_C02|S9001|C02|2026/06/01|1.50|Campus|Witness|Synthetic|0|0.00\n"
+        "R_REVIEW_C03|S9001|C03|2026/06/01|1.50|Campus|Witness|Synthetic|0|0.00\n");
     DataManager data(temporaryDirectory.path());
     require(data.loadAll(),
             "synthetic review files should load before approval");
@@ -580,20 +623,20 @@ void testVolunteerReviewPreviewAndApprovalUseCurrentCategoryScore()
     for (const string &categoryId : categoryIds)
     {
         const string recordId = "R_REVIEW_" + categoryId;
-        data.addRecord(makeRecord(
-            recordId, "S_REVIEW", categoryId, "2026/06/01", 1.75,
-            RecordStatus::Pending, 0.0));
-
         const VolunteerRecord *beforePreview = data.findRecord(recordId);
         require(beforePreview != nullptr,
                 "synthetic review record should exist before preview");
+        const VolunteerApprovalInput input =
+            makeApprovalInput(categoryId, 1.5);
         const VolunteerReviewOutcome preview =
-            service.previewApprovalScore(recordId);
+            service.previewApproval(recordId, input);
         const VolunteerCategory *category = data.findCategory(categoryId);
         require(category != nullptr,
                 "built-in review category should exist");
         const double expectedScore =
-            category->calculateScore(beforePreview->getDuration());
+            std::round(category->calculateScore(
+                           beforePreview->getAppliedDuration()) * 10.0) /
+            10.0;
         const size_t logsBeforePreview = data.getOperationLogs().size();
 
         require(preview.succeeded(),
@@ -601,7 +644,7 @@ void testVolunteerReviewPreviewAndApprovalUseCurrentCategoryScore()
         require(preview.approvalScore.has_value(),
                 "successful approval preview should return a score");
         requireNear(*preview.approvalScore, expectedScore,
-                    "preview score should use VolunteerCategory calculation");
+                    "preview should normalize current category calculation to one decimal");
         require(data.getOperationLogs().size() == logsBeforePreview,
                 "approval preview must not append an audit log");
 
@@ -613,7 +656,7 @@ void testVolunteerReviewPreviewAndApprovalUseCurrentCategoryScore()
                     "approval preview should not change stored score");
 
         const VolunteerReviewOutcome approval = service.approve(
-            "A9001", recordId);
+            "A9001", recordId, input);
         require(approval.succeeded(),
                 "Pending record approval should succeed");
         require(approval.approvalScore.has_value(),
@@ -625,8 +668,16 @@ void testVolunteerReviewPreviewAndApprovalUseCurrentCategoryScore()
         require(approved != nullptr &&
                     approved->getStatus() == RecordStatus::Approved,
                 "successful review should transition record to Approved");
-        requireNear(approved->getScore(), expectedScore,
-                    "Approved record should store category-calculated score");
+        require(approved->getFinalCategoryId() == categoryId &&
+                    approved->getFinalDuration() == 1.5 &&
+                    approved->getReviewerAccountId() == "A9001" &&
+                    !approved->getReviewNote().has_value(),
+                "unchanged approval should store final facts and reviewer without inventing a note");
+        requireNear(*approved->getSettledCoefficient(),
+                    category->getCoefficient(),
+                    "approval should freeze the current category coefficient");
+        requireNear(*approved->getFinalScore(), expectedScore,
+                    "Approved record should store one-decimal final score");
         ++expectedLogCount;
         require(data.getOperationLogs().size() == expectedLogCount,
                 "each successful approval should append exactly one log");
@@ -637,8 +688,9 @@ void testVolunteerReviewPreviewAndApprovalUseCurrentCategoryScore()
                     log.getTargetType() ==
                         OperationTargetType::VolunteerRecord &&
                     log.getTargetId() == recordId &&
-                    log.getDescription() == "志愿记录审核通过",
-                "approval audit should preserve operator, type, target and description");
+                    log.getDescription().find("最终类别：" + categoryId) != string::npos &&
+                    log.getDescription().find("最终积分：") != string::npos,
+                "approval audit should preserve operator and describe final settlement");
     }
 
     DataManager reloaded(temporaryDirectory.path());
@@ -684,13 +736,19 @@ void testVolunteerReviewRejectAndNonPendingGuards()
             "synthetic review files should load before rejection");
     VolunteerReviewService service(data);
 
+    require(service.reject("A9001", "R_REVIEW_REJECT", "  \t  ").status ==
+                VolunteerReviewStatus::ReviewNoteRequired,
+            "blank rejection reason should be rejected before mutation");
     const VolunteerReviewOutcome rejection =
-        service.reject("A9001", "R_REVIEW_REJECT");
+        service.reject("A9001", "R_REVIEW_REJECT", "补充材料不足");
     require(rejection.succeeded(),
             "Pending record should be rejectable without category lookup");
     const VolunteerRecord *rejected = data.findRecord("R_REVIEW_REJECT");
     require(rejected != nullptr &&
-                rejected->getStatus() == RecordStatus::Rejected,
+                rejected->getStatus() == RecordStatus::Rejected &&
+                rejected->getReviewerAccountId() == "A9001" &&
+                rejected->getReviewNote() == "补充材料不足" &&
+                !rejected->getFinalScore().has_value(),
             "successful rejection should transition record to Rejected");
     requireNear(rejected->getScore(), 0.0,
                 "rejection should preserve Domain score-reset behavior");
@@ -701,7 +759,7 @@ void testVolunteerReviewRejectAndNonPendingGuards()
                 rejectionLog.getOperationType() ==
                     OperationType::VolunteerRecordRejected &&
                 rejectionLog.getTargetId() == "R_REVIEW_REJECT" &&
-                rejectionLog.getDescription() == "志愿记录审核驳回",
+                rejectionLog.getDescription().find("补充材料不足") != string::npos,
             "rejection audit should identify its operator and target");
 
     const vector<pair<string, RecordStatus>> nonPendingRecords = {
@@ -714,13 +772,14 @@ void testVolunteerReviewRejectAndNonPendingGuards()
                 "non-Pending review fixture should exist");
         const double expectedScore = before->getScore();
 
-        require(service.previewApprovalScore(recordId).status ==
+        const VolunteerApprovalInput input = makeApprovalInput("C01", 1.0);
+        require(service.previewApproval(recordId, input).status ==
                     VolunteerReviewStatus::RecordNotPending,
                 "preview should reject non-Pending records");
-        require(service.approve("A9001", recordId).status ==
+        require(service.approve("A9001", recordId, input).status ==
                     VolunteerReviewStatus::RecordNotPending,
                 "approval should reject non-Pending records");
-        require(service.reject("A9001", recordId).status ==
+        require(service.reject("A9001", recordId, "reason").status ==
                     VolunteerReviewStatus::RecordNotPending,
                 "rejection should reject non-Pending records");
 
@@ -755,20 +814,26 @@ void testVolunteerReviewReportsMissingRecordsAndCategories()
             "synthetic review files should load before invalid actions");
     VolunteerReviewService service(data);
 
-    require(service.previewApprovalScore("missing-record").status ==
+    const VolunteerApprovalInput validInput = makeApprovalInput("C01", 1.5);
+
+    require(service.previewApproval("missing-record", validInput).status ==
                 VolunteerReviewStatus::RecordNotFound,
             "preview should report a missing record");
-    require(service.approve("A9001", "missing-record").status ==
+    require(service.approve("A9001", "missing-record", validInput).status ==
                 VolunteerReviewStatus::RecordNotFound,
             "approval should report a missing record");
-    require(service.reject("A9001", "missing-record").status ==
+    require(service.reject("A9001", "missing-record", "reason").status ==
                 VolunteerReviewStatus::RecordNotFound,
             "rejection should report a missing record");
 
-    require(service.previewApprovalScore("R_REVIEW_NO_CATEGORY").status ==
+    const VolunteerApprovalInput missingCategoryInput =
+        makeApprovalInput("missing-category", 1.5);
+    require(service.previewApproval(
+                "R_REVIEW_NO_CATEGORY", missingCategoryInput).status ==
                 VolunteerReviewStatus::CategoryNotFound,
             "preview should report a missing category");
-    require(service.approve("A9001", "R_REVIEW_NO_CATEGORY").status ==
+    require(service.approve(
+                "A9001", "R_REVIEW_NO_CATEGORY", missingCategoryInput).status ==
                 VolunteerReviewStatus::CategoryNotFound,
             "approval should report a missing category");
     const VolunteerRecord *unchanged =
@@ -776,10 +841,358 @@ void testVolunteerReviewReportsMissingRecordsAndCategories()
     require(unchanged != nullptr &&
                 unchanged->getStatus() == RecordStatus::Pending,
             "missing-category preview and approval should preserve status");
-    requireNear(unchanged->getScore(), 7.0,
-                "missing-category preview and approval should preserve score");
+    requireNear(unchanged->getScore(), 0.0,
+                "legacy Pending row must not fabricate an unsettled score");
     require(data.getOperationLogs().empty(),
             "preview, missing record and missing category must not log");
+}
+
+void testVolunteerReviewCorrectionRequiresNoteAndFreezesSettlement()
+{
+    ScopedTemporaryDirectory temporaryDirectory("review_corrected_settlement");
+    createReviewRuntimeData(temporaryDirectory.path(), "");
+    DataManager data(temporaryDirectory.path());
+    require(data.loadAll(), "empty synthetic review root should load");
+    data.addRecord(makeRecord(
+        "R_CORRECT", "S9001", "C01", "2026/10/07", 1.0,
+        RecordStatus::Pending, 0.0));
+    VolunteerReviewService service(data);
+
+    const VolunteerApprovalInput categoryCorrectionWithoutNote =
+        makeApprovalInput("C02", 1.0);
+    const VolunteerReviewOutcome categoryPreview =
+        service.previewApproval(
+            "R_CORRECT", categoryCorrectionWithoutNote);
+    require(categoryPreview.succeeded() &&
+                categoryPreview.approvalScore == 1.5,
+            "corrected category preview should return the authoritative score without a note");
+    require(service.approve(
+                "A9001", "R_CORRECT", categoryCorrectionWithoutNote).status ==
+                VolunteerReviewStatus::ReviewNoteRequired,
+            "corrected category approval should require a note before mutation");
+
+    const VolunteerApprovalInput durationCorrectionWithoutNote =
+        makeApprovalInput("C01", 1.5);
+    const VolunteerReviewOutcome durationPreview =
+        service.previewApproval(
+            "R_CORRECT", durationCorrectionWithoutNote);
+    require(durationPreview.succeeded(),
+            "corrected duration preview should succeed without a note");
+    require(durationPreview.approvalScore.has_value(),
+            "corrected duration preview should include a score");
+    requireNear(*durationPreview.approvalScore, 3.0,
+                "corrected duration preview should return the authoritative score");
+    require(service.approve(
+                "A9001", "R_CORRECT", durationCorrectionWithoutNote).status ==
+                VolunteerReviewStatus::ReviewNoteRequired,
+            "corrected duration approval should require a note before mutation");
+
+    VolunteerApprovalInput corrected = makeApprovalInput("C02", 1.5);
+    const VolunteerReviewOutcome combinedPreview =
+        service.previewApproval("R_CORRECT", corrected);
+    require(combinedPreview.succeeded() &&
+                combinedPreview.approvalScore == 2.3,
+            "combined correction preview should return the authoritative score without a note");
+    require(service.approve("A9001", "R_CORRECT", corrected).status ==
+                VolunteerReviewStatus::ReviewNoteRequired,
+            "combined correction approval should require a note before mutation");
+    require(data.findRecord("R_CORRECT")->getStatus() == RecordStatus::Pending &&
+                data.getOperationLogs().empty(),
+            "note-required approvals must preserve the Pending record and create no log");
+
+    const vector<double> invalidDurations = {
+        0.0,
+        -0.5,
+        0.25,
+        numeric_limits<double>::infinity(),
+        numeric_limits<double>::quiet_NaN()};
+    for (double duration : invalidDurations)
+    {
+        const VolunteerReviewOutcome invalid = service.previewApproval(
+            "R_CORRECT", makeApprovalInput("C01", duration));
+        require(invalid.status == VolunteerReviewStatus::InvalidFinalDuration,
+                "zero, negative, non-half-hour or non-finite final duration should fail");
+    }
+
+    require(service.previewApproval(
+                "R_CORRECT", makeApprovalInput("missing-category", 1.0)).status ==
+                VolunteerReviewStatus::CategoryNotFound,
+            "unknown final category should fail without mutation");
+    require(service.previewApproval(
+                "R_CORRECT", makeApprovalInput("C01", 1.0, "bad|note")).status ==
+                VolunteerReviewStatus::InvalidReviewNote,
+            "review note delimiter should be rejected");
+    require(service.previewApproval(
+                "R_CORRECT", makeApprovalInput("C01", 1.0, "bad\nnote")).status ==
+                VolunteerReviewStatus::InvalidReviewNote,
+            "review note newline should be rejected");
+
+    const VolunteerRecord *pending = data.findRecord("R_CORRECT");
+    require(pending != nullptr && pending->getStatus() == RecordStatus::Pending &&
+                pending->getAppliedCategoryId() == "C01" &&
+                !pending->getFinalScore().has_value() &&
+                data.getOperationLogs().empty(),
+            "all invalid previews and approvals must leave facts and logs untouched");
+
+    corrected.reviewNote = "  类别及时长修正  ";
+    const VolunteerReviewOutcome preview =
+        service.previewApproval("R_CORRECT", corrected);
+    require(preview.succeeded() && preview.approvalScore == 2.3,
+            "preview should show the one-decimal corrected score");
+    require(data.getOperationLogs().empty() &&
+                data.findRecord("R_CORRECT")->getStatus() == RecordStatus::Pending,
+            "corrected preview must remain read-only");
+
+    const VolunteerReviewOutcome approved =
+        service.approve("A9001", "R_CORRECT", corrected);
+    require(approved.succeeded() && approved.approvalScore == 2.3,
+            "corrected review should approve at the authoritative rounded score");
+    const VolunteerRecord *settled = data.findRecord("R_CORRECT");
+    require(settled != nullptr &&
+                settled->getAppliedCategoryId() == "C01" &&
+                settled->getAppliedDuration() == 1.0 &&
+                settled->getFinalCategoryId() == "C02" &&
+                settled->getFinalDuration() == 1.5 &&
+                settled->getReviewerAccountId() == "A9001" &&
+                settled->getReviewNote() == "类别及时长修正",
+            "approval should preserve application facts and store normalized final review facts");
+    requireNear(*settled->getSettledCoefficient(), 1.5,
+                "approval should snapshot the final category coefficient");
+    requireNear(*settled->getFinalScore(), 2.3,
+                "1.5 hours times 1.5 coefficient should freeze as 2.3");
+    require(data.getOperationLogs().size() == 1,
+            "one corrected approval should append exactly one log");
+    const string description = data.getOperationLogs().front().getDescription();
+    require(description.find("类别调整：C01→C02") != string::npos &&
+                description.find("时长调整：1.0→1.5") != string::npos &&
+                description.find("审核意见：类别及时长修正") != string::npos,
+            "single approval log should describe final facts, changes and note");
+
+    const double frozenCoefficient = *settled->getSettledCoefficient();
+    const double frozenScore = *settled->getFinalScore();
+    VolunteerCategory currentCategory("C02", "当前类别", frozenCoefficient);
+    currentCategory = VolunteerCategory("C02", "后续类别定义", 9.0);
+    require(currentCategory.getCoefficient() != frozenCoefficient &&
+                *settled->getSettledCoefficient() == frozenCoefficient &&
+                *settled->getFinalScore() == frozenScore,
+            "stored settlement snapshot should remain independent of later category definitions");
+}
+
+void testApprovedQueriesUseFinalReviewedSnapshots()
+{
+    DataManager data;
+    data.addStudent(Student("S_FINAL", "Final Facts", "unused", "Class", "Major"));
+    auto approved = VolunteerRecord::fromModernFields(
+        "R_FINAL", "S_FINAL", "2026/10/07", "C01", 1.0,
+        "Campus", "Witness", "Corrected record", RecordStatus::Approved,
+        string("C02"), 1.5, string("A9001"), string("修正说明"), 1.5, 2.3);
+    require(approved.has_value(), "modern corrected Approved record should construct");
+    data.addRecord(*approved);
+
+    requireNear(data.calculateStudentScore("S_FINAL"), 2.3,
+                "total score should use finalScore");
+    requireNear(
+        data.calculateStudentScoreByDateRange(
+            "S_FINAL", "2026/10/01", "2026/10/31"),
+        2.3,
+        "date-range score should use finalScore");
+    requireNear(data.calculateStudentDurationByCategory("S_FINAL", "C01"), 0.0,
+                "approved duration should not remain assigned to applied category");
+    requireNear(data.calculateStudentDurationByCategory("S_FINAL", "C02"), 1.5,
+                "approved duration should use final category and final duration");
+    const vector<RankingItem> ranking = data.generateRanking();
+    require(ranking.size() == 1 && ranking.front().studentId == "S_FINAL",
+            "ranking should include the synthetic student");
+    requireNear(ranking.front().score, 2.3,
+                "ranking should consume finalScore-based totals");
+}
+
+void testCategoryAndDurationCorrectionsEachRequireANote()
+{
+    ScopedTemporaryDirectory temporaryDirectory("review_separate_corrections");
+    createReviewRuntimeData(temporaryDirectory.path(), "");
+    DataManager data(temporaryDirectory.path());
+    require(data.loadAll(), "synthetic correction root should load");
+    data.addRecord(makeRecord(
+        "R_CATEGORY_ONLY", "S9001", "C01", "2026/10/07", 1.0,
+        RecordStatus::Pending, 0.0));
+    data.addRecord(makeRecord(
+        "R_DURATION_ONLY", "S9001", "C01", "2026/10/07", 1.0,
+        RecordStatus::Pending, 0.0));
+    VolunteerReviewService service(data);
+
+    const VolunteerApprovalInput categoryWithoutNote =
+        makeApprovalInput("C02", 1.0);
+    const VolunteerApprovalInput durationWithoutNote =
+        makeApprovalInput("C01", 1.5);
+    require(service.approve(
+                "A9001", "R_CATEGORY_ONLY", categoryWithoutNote).status ==
+                VolunteerReviewStatus::ReviewNoteRequired,
+            "category-only correction should require a review note");
+    require(service.approve(
+                "A9001", "R_DURATION_ONLY", durationWithoutNote).status ==
+                VolunteerReviewStatus::ReviewNoteRequired,
+            "duration-only correction should require a review note");
+    require(data.getOperationLogs().empty(),
+            "blocked corrections must not create audit rows");
+
+    require(service.approve(
+                "A9001", "R_CATEGORY_ONLY",
+                makeApprovalInput("C02", 1.0, "类别调整原因")).succeeded(),
+            "category correction with a note should succeed");
+    const VolunteerRecord *categoryCorrected =
+        data.findRecord("R_CATEGORY_ONLY");
+    require(categoryCorrected != nullptr &&
+                categoryCorrected->getAppliedCategoryId() == "C01" &&
+                categoryCorrected->getFinalCategoryId() == "C02" &&
+                categoryCorrected->getFinalDuration() == 1.0,
+            "category correction should retain application facts separately");
+
+    require(service.approve(
+                "A9001", "R_DURATION_ONLY",
+                makeApprovalInput("C01", 1.5, "时长调整原因")).succeeded(),
+            "duration correction with a note should succeed");
+    const VolunteerRecord *durationCorrected =
+        data.findRecord("R_DURATION_ONLY");
+    require(durationCorrected != nullptr &&
+                durationCorrected->getFinalCategoryId() == "C01" &&
+                durationCorrected->getFinalDuration() == 1.5,
+            "duration correction should store only the changed final fact");
+    requireNear(*durationCorrected->getFinalScore(), 3.0,
+                "corrected duration should determine finalScore");
+    require(data.getOperationLogs().size() == 2,
+            "each successful corrected approval should create one audit row");
+}
+
+void testReviewDoesNotImposeTwelveHourCap()
+{
+    ScopedTemporaryDirectory temporaryDirectory("review_no_twelve_hour_cap");
+    createReviewRuntimeData(temporaryDirectory.path(), "");
+    DataManager data(temporaryDirectory.path());
+    require(data.loadAll(), "synthetic long-duration root should load");
+    data.addRecord(makeRecord(
+        "R_LONG", "S9001", "C01", "2026/10/07", 1.0,
+        RecordStatus::Pending, 0.0));
+    VolunteerReviewService service(data);
+
+    const VolunteerApprovalInput input =
+        makeApprovalInput("C01", 12.5, "核实服务时长");
+    const VolunteerReviewOutcome approved =
+        service.approve("A9001", "R_LONG", input);
+    require(approved.succeeded(),
+            "valid duration above 12 hours should not hit a new hard cap");
+    requireNear(*data.findRecord("R_LONG")->getFinalDuration(), 12.5,
+                "approved final duration should preserve values above 12 hours");
+    requireNear(*data.findRecord("R_LONG")->getFinalScore(), 25.0,
+                "score should derive from the uncapped final duration");
+}
+
+void testMixedLegacyAndModernRecordPersistence()
+{
+    ScopedTemporaryDirectory temporaryDirectory("mixed_record_formats");
+    createSyntheticRuntimeData(temporaryDirectory.path());
+    writeRuntimeFile(
+        temporaryDirectory.path(),
+        "records.txt",
+        "R_LEGACY_APPROVED|S9001|C01|2026/10/01|1.50|Campus|Witness|Old approved|1|2.25\n"
+        "R_LEGACY_PENDING|S9001|C01|2026/10/02|1.00|Campus|Witness|Old pending|0|0.00\n"
+        "R_LEGACY_REJECTED|S9001|C02|2026/10/03|1.00|Campus|Witness|Old rejected|2|0.00\n"
+        "R_MODERN_PENDING|S9001|2026/10/04|C01|1.0|Campus|Witness|Modern pending|0||||||\n"
+        "R_MODERN_REJECTED|S9001|2026/10/05|C01|1.0|Campus|Witness|Modern rejected|2|||A9001|补充证明||\n"
+        "R_MODERN_APPROVED|S9001|2026/10/06|C01|1.0|Campus|Witness|Modern approved|1|C02|1.5|A9001|类别修正|1.5|2.3\n");
+
+    DataManager data(temporaryDirectory.path());
+    require(data.loadRecords() && data.getRecords().size() == 6,
+            "mixed legacy and modern records should load together");
+    const VolunteerRecord *legacyApproved =
+        data.findRecord("R_LEGACY_APPROVED");
+    require(legacyApproved != nullptr &&
+                legacyApproved->isLegacyCompatibilityRecord() &&
+                legacyApproved->getFinalCategoryId() == "C01" &&
+                legacyApproved->getFinalDuration() == 1.5 &&
+                legacyApproved->getFinalScore() == 2.25 &&
+                !legacyApproved->getReviewerAccountId().has_value() &&
+                !legacyApproved->getReviewNote().has_value() &&
+                !legacyApproved->getSettledCoefficient().has_value(),
+            "legacy Approved should map known facts without fabricating review history");
+    const VolunteerRecord *legacyRejected =
+        data.findRecord("R_LEGACY_REJECTED");
+    require(legacyRejected != nullptr &&
+                legacyRejected->getStatus() == RecordStatus::Rejected &&
+                legacyRejected->isLegacyCompatibilityRecord() &&
+                !legacyRejected->getReviewerAccountId().has_value() &&
+                !legacyRejected->getReviewNote().has_value() &&
+                !legacyRejected->getFinalScore().has_value(),
+            "legacy Rejected should preserve state without invented review facts");
+    const VolunteerRecord *modernRejected =
+        data.findRecord("R_MODERN_REJECTED");
+    require(modernRejected != nullptr &&
+                !modernRejected->isLegacyCompatibilityRecord() &&
+                modernRejected->getReviewerAccountId() == "A9001" &&
+                modernRejected->getReviewNote() == "补充证明" &&
+                !modernRejected->getFinalCategoryId().has_value(),
+            "modern Rejected invariants should round-trip");
+
+    data.saveRecords();
+    const string serialized = readFile(
+        temporaryDirectory.path() / "records.txt");
+    const auto countFields = [](const string &row)
+    {
+        return 1 + static_cast<int>(count(row.begin(), row.end(), '|'));
+    };
+    istringstream rows(serialized);
+    string row;
+    bool sawLegacyApproved = false;
+    bool sawModernPending = false;
+    bool sawModernRejected = false;
+    bool sawModernApproved = false;
+    while (getline(rows, row))
+    {
+        if (row.rfind("R_LEGACY_APPROVED|", 0) == 0)
+        {
+            sawLegacyApproved = countFields(row) == 10 &&
+                                row.find("|2.25") != string::npos;
+        }
+        if (row.rfind("R_MODERN_APPROVED|", 0) == 0)
+        {
+            sawModernApproved = countFields(row) == 15 &&
+                                row.find("|C02|1.5|A9001|类别修正|1.5|2.3") != string::npos;
+        }
+        if (row.rfind("R_MODERN_PENDING|", 0) == 0)
+        {
+            sawModernPending = countFields(row) == 15;
+        }
+        if (row.rfind("R_MODERN_REJECTED|", 0) == 0)
+        {
+            sawModernRejected = countFields(row) == 15;
+        }
+    }
+    require(sawLegacyApproved && sawModernPending && sawModernRejected &&
+                sawModernApproved,
+            "one serializer should preserve legacy 10-field and all modern 15-field states");
+
+    DataManager roundTripped(temporaryDirectory.path());
+    require(roundTripped.loadRecords() &&
+                roundTripped.getRecords().size() == 6 &&
+                roundTripped.findRecord("R_MODERN_PENDING")->getStatus() ==
+                    RecordStatus::Pending &&
+                roundTripped.findRecord("R_MODERN_REJECTED")->getReviewNote() ==
+                    "补充证明" &&
+                roundTripped.findRecord("R_MODERN_APPROVED")->getFinalScore() ==
+                    2.3,
+            "Pending, Rejected and Approved modern records should survive round-trip");
+
+    writeRuntimeFile(
+        temporaryDirectory.path(),
+        "records.txt",
+        "R_KEEP|S9001|C01|2026/10/01|1.00|Campus|Witness|Keep|0|0.00\n"
+        "R_BAD_MODERN|S9001|2026/10/02|C01|1.0|Campus|Witness|Bad|1|C01|1.0|| |2.0|2.0\n");
+    require(!data.loadRecords(),
+            "malformed modern Approved invariants should fail the full load");
+    require(data.getRecords().size() == 6 &&
+                data.findRecord("R_LEGACY_APPROVED") != nullptr &&
+                data.findRecord("R_KEEP") == nullptr,
+            "failed modern load should preserve the previous collection atomically");
 }
 
 OperationLog makeOperationLog(
@@ -797,6 +1210,103 @@ OperationLog makeOperationLog(
         targetId,
         description,
         operationTime);
+}
+
+void testRejectedModificationClearsCurrentFactsAndKeepsAuditHistory()
+{
+    ScopedTemporaryDirectory temporaryDirectory("rejected_resubmit_history");
+    createReviewRuntimeData(
+        temporaryDirectory.path(),
+        "R_REJECTED|S9001|2026/10/07|C01|1.0|Campus|Witness|Rejected|2|||A9001|请补充证明||\n");
+    DataManager data(temporaryDirectory.path());
+    require(data.loadAll(), "modern Rejected runtime data should load");
+    data.addOperationLog(makeOperationLog(
+        "LOG000001", OperationType::VolunteerRecordRejected,
+        "R_REJECTED", "请补充证明", "2026-10-07T12:00:00"));
+    StudentVolunteerService service(data);
+
+    const StudentVolunteerOutcome modified = service.modify(
+        "S9001", "R_REJECTED", validStudentVolunteerInput());
+    require(modified.succeeded() && modified.recordId == "R_REJECTED",
+            "owner modification should preserve stable record identity");
+    const VolunteerRecord *resubmitted = data.findRecord("R_REJECTED");
+    require(resubmitted != nullptr &&
+                resubmitted->getStatus() == RecordStatus::Pending &&
+                !resubmitted->getReviewerAccountId().has_value() &&
+                !resubmitted->getReviewNote().has_value() &&
+                !resubmitted->getFinalCategoryId().has_value() &&
+                !resubmitted->getFinalDuration().has_value() &&
+                !resubmitted->getSettledCoefficient().has_value() &&
+                !resubmitted->getFinalScore().has_value(),
+            "Rejected modification should clear current review and settlement facts");
+    require(data.getOperationLogs().size() == 1 &&
+                data.getOperationLogs().front().getTargetId() == "R_REJECTED",
+            "student resubmission should leave historical OperationLog unchanged");
+}
+
+void testDataManagerLoadsModernReviewRecord()
+{
+    ScopedTemporaryDirectory temporaryDirectory("modern_review_record");
+    createSyntheticRuntimeData(temporaryDirectory.path());
+    writeRuntimeFile(
+        temporaryDirectory.path(),
+        "records.txt",
+        "R_MODERN|S9001|2026/10/01|C01|1.0|Campus|Witness|Modern pending|0||||||\n");
+
+    DataManager data(temporaryDirectory.path());
+    require(data.loadRecords(),
+            "a valid 15-field modern record should load");
+    require(data.getRecords().size() == 1 &&
+                data.findRecord("R_MODERN") != nullptr,
+            "the modern record should be published after a successful load");
+}
+
+void testDataManagerDoesNotPublishPartialRecordLoad()
+{
+    ScopedTemporaryDirectory temporaryDirectory("atomic_record_load");
+    createSyntheticRuntimeData(temporaryDirectory.path());
+    writeRuntimeFile(
+        temporaryDirectory.path(),
+        "records.txt",
+        "R_KEEP|S9001|C01|2026/10/01|1.00|Campus|Witness|Existing|0|0.00\n");
+
+    DataManager data(temporaryDirectory.path());
+    require(data.loadRecords() && data.getRecords().size() == 1,
+            "the initial legacy collection should load");
+
+    writeRuntimeFile(
+        temporaryDirectory.path(),
+        "records.txt",
+        "R_NEW|S9001|2026/10/02|C02|1.0|Campus|Witness|Modern pending|0||||||\n"
+        "malformed|row\n");
+
+    require(!data.loadRecords(),
+            "an unsupported or malformed row should fail the whole record load");
+    require(data.getRecords().size() == 1 &&
+                data.findRecord("R_KEEP") != nullptr &&
+                data.findRecord("R_NEW") == nullptr,
+            "a failed load must preserve the prior authoritative collection");
+}
+
+void testDataManagerScoreTotalsUseOneDecimalPrecision()
+{
+    ScopedTemporaryDirectory temporaryDirectory("one_decimal_score_total");
+    createSyntheticRuntimeData(temporaryDirectory.path());
+    writeRuntimeFile(
+        temporaryDirectory.path(),
+        "records.txt",
+        "R_SCORE|S9001|C02|2026/10/03|1.50|Campus|Witness|Historical|1|2.25\n");
+
+    DataManager data(temporaryDirectory.path());
+    require(data.loadRecords(),
+            "the historical score fixture should load");
+    requireNear(data.calculateStudentScore("S9001"), 2.3,
+                "score totals should expose one-decimal business precision");
+    requireNear(
+        data.calculateStudentScoreByDateRange(
+            "S9001", "2026/10/01", "2026/10/31"),
+        2.3,
+        "date-range score totals should expose one-decimal precision");
 }
 
 void testOperationLogFieldsEnumsAndCsvRoundTrip()
@@ -1013,7 +1523,7 @@ void verifyReviewPersistenceFailureRestoresState(bool failPrepare)
 
     VolunteerReviewService service(data);
     const VolunteerReviewOutcome outcome =
-        service.approve("A9001", "R0001");
+        service.approve("A9001", "R0001", makeApprovalInput("C01", 1.0));
     require(outcome.status == VolunteerReviewStatus::PersistenceFailure,
             "unchanged-file save failure should report PersistenceFailure");
     const VolunteerRecord *restored = data.findRecord("R0001");
@@ -1059,7 +1569,7 @@ void testReviewServiceReportsSeverePartialCommit()
 
     VolunteerReviewService service(data);
     const VolunteerReviewOutcome outcome =
-        service.approve("A9001", "R0001");
+        service.approve("A9001", "R0001", makeApprovalInput("C01", 1.0));
     require(outcome.status ==
                 VolunteerReviewStatus::SeverePersistenceFailure,
             "partial formal commit must report severe persistence failure");
@@ -1086,9 +1596,9 @@ void testReviewPersistencePrepareFailureLeavesBothFilesUnchanged()
         temporaryDirectory.path() / "operation_logs.csv.tmp");
 
     DataManager data(temporaryDirectory.path());
-    data.addRecord(VolunteerRecord(
+    data.addRecord(makeRecord(
         "R0001", "S9001", "C01", "2026/10/01", 1.0,
-        "Campus", "Witness", "Original", RecordStatus::Approved, 2.0));
+        RecordStatus::Approved, 2.0));
     data.addOperationLog(makeOperationLog(
         "LOG000001",
         OperationType::VolunteerRecordApproved,
@@ -1126,9 +1636,9 @@ void testReviewPersistenceReportsOrderedSeverePartialCommit()
         "reserved backup path\n");
 
     DataManager data(temporaryDirectory.path());
-    data.addRecord(VolunteerRecord(
+    data.addRecord(makeRecord(
         "R0001", "S9001", "C01", "2026/10/01", 1.0,
-        "Campus", "Witness", "Original", RecordStatus::Approved, 2.0));
+        RecordStatus::Approved, 2.0));
     data.addOperationLog(makeOperationLog(
         "LOG000001",
         OperationType::VolunteerRecordApproved,
@@ -1167,7 +1677,8 @@ void testReviewPersistenceWritesAndReloadsBothFiles()
             "synthetic review files should load before commit");
     VolunteerRecord *record = data.findRecord("R0001");
     require(record != nullptr, "synthetic review record should load");
-    record->approve(2.25);
+    require(record->approve("A9001", "C01", 1.0, 2.0, 2.0, ""),
+            "synthetic pending record should approve before persistence");
     data.addOperationLog(makeOperationLog(
         "LOG000001",
         OperationType::VolunteerRecordApproved,
@@ -1186,7 +1697,7 @@ void testReviewPersistenceWritesAndReloadsBothFiles()
     require(reloaded.findRecord("R0001") != nullptr &&
                 reloaded.findRecord("R0001")->getStatus() ==
                     RecordStatus::Approved &&
-                reloaded.findRecord("R0001")->getScore() == 2.25,
+                reloaded.findRecord("R0001")->getFinalScore() == 2.0,
             "records.txt should contain the committed review state");
     require(reloaded.getOperationLogs().size() == 1 &&
                 reloaded.getOperationLogs()[0].getLogId() == "LOG000001" &&
@@ -1213,10 +1724,19 @@ int main()
         testVolunteerReviewPreviewAndApprovalUseCurrentCategoryScore();
         testVolunteerReviewRejectAndNonPendingGuards();
         testVolunteerReviewReportsMissingRecordsAndCategories();
+        testVolunteerReviewCorrectionRequiresNoteAndFreezesSettlement();
+        testApprovedQueriesUseFinalReviewedSnapshots();
+        testCategoryAndDurationCorrectionsEachRequireANote();
+        testReviewDoesNotImposeTwelveHourCap();
+        testMixedLegacyAndModernRecordPersistence();
         testDataManagerLoadsFromExplicitSyntheticRoot();
         testDataManagerReportsMissingRootOrRequiredFile();
+        testDataManagerScoreTotalsUseOneDecimalPrecision();
+        testDataManagerDoesNotPublishPartialRecordLoad();
+        testDataManagerLoadsModernReviewRecord();
         testExplicitDataRootIgnoresProcessWorkingDirectory();
         testOperationLogFieldsEnumsAndCsvRoundTrip();
+        testRejectedModificationClearsCurrentFactsAndKeepsAuditHistory();
         testOperationLogCsvRejectsDuplicateIdsWithoutPublishingPartialResults();
         testOperationLogServiceQueriesAndGeneratesNextId();
         testHistoricalOperationLogTargetProtectsRecordId();

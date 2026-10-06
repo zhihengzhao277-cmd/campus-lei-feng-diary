@@ -531,7 +531,7 @@ namespace
         card->findChild<QLabel *>("rankingTopAccount")
             ->setText(QString::fromStdString(item.studentId));
         card->findChild<QLabel *>("rankingTopScore")
-            ->setText(QString("积分 %1").arg(item.score, 0, 'f', 2));
+            ->setText(QString("积分 %1").arg(item.score, 0, 'f', 1));
         card->setProperty(
             "currentStudent",
             item.studentId == currentAccountId);
@@ -712,6 +712,7 @@ StudentMainWindow::StudentMainWindow(
       recordsPage(nullptr),
       recordsTable(nullptr),
       recordsEmptyLabel(nullptr),
+      recordsReviewDetailLabel(nullptr),
       categoryFilter(nullptr),
       startDateEdit(nullptr),
       endDateEdit(nullptr),
@@ -1038,7 +1039,7 @@ void StudentMainWindow::refreshDashboard()
     {
         dashboardScoreLabel->setText(
             QString::number(
-                dataManager->calculateStudentScore(accountId), 'f', 2));
+                dataManager->calculateStudentScore(accountId), 'f', 1));
     }
 
     int approvedRecordCount = 0;
@@ -1332,6 +1333,14 @@ void StudentMainWindow::buildRecordsPage()
     recordsTable->hide();
     tableCardLayout->addWidget(recordsTable, 1);
     tableCardLayout->addWidget(recordsEmptyLabel, 1);
+    recordsReviewDetailLabel = new QLabel(
+        "选择一条记录查看审核结果。");
+    recordsReviewDetailLabel->setObjectName(
+        "studentRecordsReviewDetail");
+    recordsReviewDetailLabel->setWordWrap(true);
+    recordsReviewDetailLabel->setTextInteractionFlags(
+        Qt::TextSelectableByMouse);
+    tableCardLayout->addWidget(recordsReviewDetailLabel);
     layout->addWidget(tableCard, 1);
 
     connect(
@@ -1363,6 +1372,12 @@ void StudentMainWindow::buildRecordsPage()
         &QPushButton::clicked,
         this,
         &StudentMainWindow::deleteSelectedRecord);
+
+    connect(
+        recordsTable,
+        &QTableWidget::itemSelectionChanged,
+        this,
+        &StudentMainWindow::showSelectedRecordReviewDetails);
 
     refreshMyRecords();
 }
@@ -2308,7 +2323,7 @@ void StudentMainWindow::refreshMyRecords()
         }
 
         if (!selectedCategory.empty() &&
-            record->getCategoryId() != selectedCategory)
+            record->getAppliedCategoryId() != selectedCategory)
         {
             continue;
         }
@@ -2342,7 +2357,7 @@ void StudentMainWindow::refreshMyRecords()
             1,
             new QTableWidgetItem(
                 categoryName(
-                    record->getCategoryId())));
+                    record->getAppliedCategoryId())));
         recordsTable->item(row, 1)->setTextAlignment(
             Qt::AlignLeft | Qt::AlignVCenter);
 
@@ -2356,9 +2371,9 @@ void StudentMainWindow::refreshMyRecords()
 
         QTableWidgetItem *durationItem = new QTableWidgetItem(
             QString::number(
-                record->getDuration(),
-                'f',
-                1) +
+                record->getAppliedDuration(),
+                'g',
+                15) +
             " 小时");
         durationItem->setTextAlignment(
             Qt::AlignRight | Qt::AlignVCenter);
@@ -2419,10 +2434,11 @@ void StudentMainWindow::refreshMyRecords()
             row,
             5,
             new QTableWidgetItem(
-                QString::number(
-                    record->getScore(),
-                    'f',
-                    2)));
+                record->getStatus() == RecordStatus::Approved &&
+                        record->getFinalScore().has_value()
+                    ? QString::number(
+                          *record->getFinalScore(), 'f', 1)
+                    : QStringLiteral("—")));
         recordsTable->item(row, 5)->setTextAlignment(
             Qt::AlignRight | Qt::AlignVCenter);
     }
@@ -2430,6 +2446,77 @@ void StudentMainWindow::refreshMyRecords()
     const bool hasRecords = recordsTable->rowCount() > 0;
     recordsTable->setVisible(hasRecords);
     recordsEmptyLabel->setVisible(!hasRecords);
+    showSelectedRecordReviewDetails();
+}
+
+void StudentMainWindow::showSelectedRecordReviewDetails()
+{
+    if (recordsReviewDetailLabel == nullptr ||
+        recordsTable == nullptr || dataManager == nullptr)
+    {
+        return;
+    }
+
+    const int row = recordsTable->currentRow();
+    if (row < 0 || recordsTable->item(row, 0) == nullptr)
+    {
+        recordsReviewDetailLabel->setText(
+            "选择一条记录查看审核结果。");
+        return;
+    }
+
+    const std::string recordId = recordsTable->item(row, 0)
+                                     ->text().toStdString();
+    const VolunteerRecord *record = dataManager->findRecord(recordId);
+    if (record == nullptr)
+    {
+        recordsReviewDetailLabel->setText("该记录已不存在。");
+        return;
+    }
+
+    QString detail =
+        "申请信息：" + categoryName(record->getAppliedCategoryId()) +
+        "，" + QString::number(record->getAppliedDuration(), 'g', 15) +
+        " 小时\n";
+    if (record->getStatus() == RecordStatus::Pending)
+    {
+        detail += "待审核，当前没有审核结果。";
+    }
+    else if (record->getStatus() == RecordStatus::Rejected)
+    {
+        detail += "审核状态：已驳回\n审核意见：";
+        if (record->getReviewNote().has_value())
+        {
+            detail += QString::fromStdString(*record->getReviewNote());
+        }
+        else if (record->isLegacyCompatibilityRecord())
+        {
+            detail += "历史记录未保存审核意见";
+        }
+        else
+        {
+            detail += "暂无审核意见";
+        }
+    }
+    else
+    {
+        detail += "审核状态：已通过\n最终信息：" +
+                  categoryName(record->getFinalCategoryId().value_or(
+                      record->getAppliedCategoryId())) +
+                  "，" + QString::number(
+                      record->getFinalDuration().value_or(
+                          record->getAppliedDuration()), 'g', 15) +
+                  " 小时，" + QString::number(
+                      record->getFinalScore().value_or(0.0), 'f', 1) +
+                  " 积分";
+        if (record->getReviewNote().has_value())
+        {
+            detail += "\n审核意见：" + QString::fromStdString(
+                *record->getReviewNote());
+        }
+    }
+
+    recordsReviewDetailLabel->setText(detail);
 }
 
 QString StudentMainWindow::statusText(
@@ -2577,11 +2664,11 @@ void StudentMainWindow::modifySelectedRecord()
 
     int currentCategoryIndex = 0;
 
-    if (record->getCategoryId() == "C02")
+    if (record->getAppliedCategoryId() == "C02")
     {
         currentCategoryIndex = 1;
     }
-    else if (record->getCategoryId() == "C03")
+    else if (record->getAppliedCategoryId() == "C03")
     {
         currentCategoryIndex = 2;
     }
@@ -2646,7 +2733,7 @@ void StudentMainWindow::modifySelectedRecord()
             this,
             "修改志愿记录",
             "服务时长（小时）：",
-            record->getDuration(),
+            record->getAppliedDuration(),
             0.0,
             10000.0,
             1,
@@ -3044,7 +3131,7 @@ void StudentMainWindow::refreshScorePage()
         QString::number(
             score,
             'f',
-            2));
+            1));
 }
 
 void StudentMainWindow::calculateMonthlyScore()
@@ -3086,7 +3173,7 @@ void StudentMainWindow::calculateMonthlyScore()
                 endDate);
 
     monthlyScoreLabel->setText(
-        QString("月度积分：%1").arg(score, 0, 'f', 2));
+        QString("月度积分：%1").arg(score, 0, 'f', 1));
 }
 
 void StudentMainWindow::calculateSemesterScore()
@@ -3130,7 +3217,7 @@ void StudentMainWindow::calculateSemesterScore()
                 endDate);
 
     semesterScoreLabel->setText(
-        QString("日期范围积分：%1").arg(score, 0, 'f', 2));
+        QString("日期范围积分：%1").arg(score, 0, 'f', 1));
 }
 
 void StudentMainWindow::refreshRankingPage()
@@ -3183,7 +3270,7 @@ void StudentMainWindow::addRankingTableRow(
         rankingTable,
         row,
         3,
-        QString::number(score, 'f', 2),
+        QString::number(score, 'f', 1),
         id,
         isCurrentStudent);
     rankingTable->setCellWidget(
@@ -3261,7 +3348,8 @@ void StudentMainWindow::refreshDiaryPublishOptions()
             QString::fromStdString(
                 record.getRecordId()) +
             " · " +
-            categoryName(record.getCategoryId()) +
+            categoryName(record.getFinalCategoryId().value_or(
+                record.getAppliedCategoryId())) +
             " · " +
             QString::fromStdString(record.getDate());
 

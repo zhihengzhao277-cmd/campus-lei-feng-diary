@@ -36,6 +36,7 @@ signals:
 private slots:
     void handleNavigationChanged(int row);
     void refreshMyRecords();
+    void showSelectedRecordReviewDetails();
     void refreshDashboard();
     void applyRecordFilter();
     void clearRecordFilter();
@@ -68,6 +69,7 @@ private:
     QWidget *recordsPage;
     QTableWidget *recordsTable;
     QLabel *recordsEmptyLabel;
+    QLabel *recordsReviewDetailLabel;
     void buildInterface();
     void buildHomePage();
     void buildRecordsPage();

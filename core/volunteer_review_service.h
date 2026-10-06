@@ -12,8 +12,18 @@ enum class VolunteerReviewStatus
     RecordNotFound,
     RecordNotPending,
     CategoryNotFound,
+    InvalidFinalDuration,
+    ReviewNoteRequired,
+    InvalidReviewNote,
     PersistenceFailure,
     SeverePersistenceFailure
+};
+
+struct VolunteerApprovalInput
+{
+    std::string finalCategoryId;
+    double finalDuration = 0.0;
+    std::string reviewNote;
 };
 
 struct VolunteerReviewOutcome
@@ -32,16 +42,19 @@ class VolunteerReviewService
 public:
     explicit VolunteerReviewService(DataManager &dataManager);
 
-    VolunteerReviewOutcome previewApprovalScore(
-        const std::string &recordId) const;
+    VolunteerReviewOutcome previewApproval(
+        const std::string &recordId,
+        const VolunteerApprovalInput &input) const;
 
     VolunteerReviewOutcome approve(
         const std::string &operatorAccountId,
-        const std::string &recordId);
+        const std::string &recordId,
+        const VolunteerApprovalInput &input);
 
     VolunteerReviewOutcome reject(
         const std::string &operatorAccountId,
-        const std::string &recordId);
+        const std::string &recordId,
+        const std::string &reviewNote);
 
 private:
     DataManager &dataManager_;

@@ -52,8 +52,13 @@ std::vector<DiaryPostPublicView> DiaryService::queryPublicFeed(
             continue;
         }
 
+        const std::string finalCategoryId =
+            record->getFinalCategoryId().value_or(
+                record->getAppliedCategoryId());
+        const double finalDuration = record->getFinalDuration().value_or(
+            record->getAppliedDuration());
         const VolunteerCategory *category =
-            dataManager_.findCategory(record->getCategoryId());
+            dataManager_.findCategory(finalCategoryId);
 
         DiaryPostPublicView view;
         view.diaryId = diary.getDiaryId();
@@ -61,9 +66,9 @@ std::vector<DiaryPostPublicView> DiaryService::queryPublicFeed(
         view.authorName = author->getName();
         view.categoryName = category != nullptr
             ? category->getName()
-            : record->getCategoryId();
+            : finalCategoryId;
         view.serviceDate = record->getDate();
-        view.durationHours = record->getDuration();
+        view.durationHours = finalDuration;
         view.place = record->getPlace();
         view.content = diary.getMessage();
         view.likeCount = diary.getLikeCount();

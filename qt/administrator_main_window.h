@@ -13,6 +13,7 @@ class QLineEdit;
 class QFrame;
 class QPushButton;
 class QLabel;
+class QDoubleSpinBox;
 class QListWidget;
 class QStackedWidget;
 class QTableView;
@@ -41,6 +42,7 @@ private slots:
     void showSelectedRecordDetail();
     void approveSelectedRecord();
     void rejectSelectedRecord();
+    void updateReviewPreview();
     void refreshOperationLogPage();
     void applyOperationLogFilter();
     void refreshStatisticsPage();
@@ -81,7 +83,16 @@ private:
     QLabel *detailWitnessLabel;
     QLabel *detailDescriptionLabel;
     QLabel *detailStatusLabel;
+    QLabel *detailReviewerLabel;
     QLabel *detailScoreLabel;
+    QLabel *detailFinalFactsLabel;
+    QLabel *detailReviewNoteLabel;
+
+    QComboBox *reviewFinalCategoryCombo;
+    QDoubleSpinBox *reviewFinalDurationSpin;
+    QLineEdit *reviewNoteEdit;
+    QLabel *reviewPreviewScoreLabel;
+    QWidget *reviewInputsContainer;
 
     QPushButton *approveButton;
     QPushButton *rejectButton;

@@ -51,9 +51,7 @@ StudentVolunteerOutcome StudentVolunteerService::submit(
         input.durationHours,
         input.place,
         input.witness,
-        input.description,
-        RecordStatus::Pending,
-        0.0));
+        input.description));
 
     return {StudentVolunteerStatus::Success, recordId};
 }
@@ -92,9 +90,9 @@ StudentVolunteerOutcome StudentVolunteerService::modify(
     const bool wasRejected =
         record->getStatus() == RecordStatus::Rejected;
 
-    record->setCategoryId(input.categoryId);
+    record->setAppliedCategoryId(input.categoryId);
     record->setDate(input.date);
-    record->setDuration(input.durationHours);
+    record->setAppliedDuration(input.durationHours);
     record->setPlace(input.place);
     record->setWitness(input.witness);
     record->setDescription(input.description);

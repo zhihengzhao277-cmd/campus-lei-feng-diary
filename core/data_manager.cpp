@@ -1,5 +1,6 @@
 #include "data_manager.h"
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -108,23 +109,143 @@ void removeTemporaryFile(const filesystem::path &path)
 string serializeRecords(const vector<VolunteerRecord> &records)
 {
     ostringstream contents;
-    contents << fixed << setprecision(2);
     for (const VolunteerRecord &record : records)
     {
-        contents
+        ostringstream row;
+        if (record.isLegacyCompatibilityRecord())
+        {
+            row << fixed << setprecision(2)
+                << record.getRecordId() << "|"
+                << record.getStudentId() << "|"
+                << record.getAppliedCategoryId() << "|"
+                << record.getDate() << "|"
+                << record.getAppliedDuration() << "|"
+                << record.getPlace() << "|"
+                << record.getWitness() << "|"
+                << record.getDescription() << "|"
+                << static_cast<int>(record.getStatus()) << "|"
+                << record.legacyScoreForSerialization();
+            contents << row.str() << '\n';
+            continue;
+        }
+
+        row << setprecision(numeric_limits<double>::max_digits10)
+            << defaultfloat
             << record.getRecordId() << "|"
             << record.getStudentId() << "|"
-            << record.getCategoryId() << "|"
             << record.getDate() << "|"
-            << record.getDuration() << "|"
+            << record.getAppliedCategoryId() << "|"
+            << record.getAppliedDuration() << "|"
             << record.getPlace() << "|"
             << record.getWitness() << "|"
             << record.getDescription() << "|"
             << static_cast<int>(record.getStatus()) << "|"
-            << record.getScore()
-            << '\n';
+            << record.getFinalCategoryId().value_or("") << "|";
+
+        if (record.getFinalDuration().has_value())
+        {
+            row << *record.getFinalDuration();
+        }
+        row << "|"
+            << record.getReviewerAccountId().value_or("") << "|"
+            << record.getReviewNote().value_or("") << "|";
+
+        if (record.getSettledCoefficient().has_value())
+        {
+            row << *record.getSettledCoefficient();
+        }
+        row << "|";
+        if (record.getFinalScore().has_value())
+        {
+            row << fixed << setprecision(1) << *record.getFinalScore();
+        }
+        contents << row.str() << '\n';
     }
     return contents.str();
+}
+
+bool parseFiniteDouble(const string &text, double &value)
+{
+    if (text.empty())
+    {
+        return false;
+    }
+
+    try
+    {
+        size_t parsedCharacters = 0;
+        value = stod(text, &parsedCharacters);
+        return parsedCharacters == text.size() && isfinite(value);
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool parseRecordStatus(const string &text, RecordStatus &status)
+{
+    try
+    {
+        size_t parsedCharacters = 0;
+        const int value = stoi(text, &parsedCharacters);
+        if (parsedCharacters != text.size())
+        {
+            return false;
+        }
+        if (value == static_cast<int>(RecordStatus::Pending))
+        {
+            status = RecordStatus::Pending;
+            return true;
+        }
+        if (value == static_cast<int>(RecordStatus::Approved))
+        {
+            status = RecordStatus::Approved;
+            return true;
+        }
+        if (value == static_cast<int>(RecordStatus::Rejected))
+        {
+            status = RecordStatus::Rejected;
+            return true;
+        }
+    }
+    catch (...)
+    {
+    }
+    return false;
+}
+
+optional<string> optionalField(const string &text)
+{
+    if (text.empty())
+    {
+        return nullopt;
+    }
+    return text;
+}
+
+bool parseOptionalDouble(
+    const string &text,
+    optional<double> &value)
+{
+    if (text.empty())
+    {
+        value.reset();
+        return true;
+    }
+
+    double parsed = 0.0;
+    if (!parseFiniteDouble(text, parsed))
+    {
+        return false;
+    }
+    value = parsed;
+    return true;
+}
+
+double normalizeScoreToOneDecimal(double score)
+{
+    return round(score * 10.0) / 10.0;
 }
 }
 
@@ -245,35 +366,81 @@ bool DataManager::loadRecords() /// AI大修
         return false;
     }
 
+    vector<VolunteerRecord> loadedRecords;
     string line;
-    records.clear();
-
     while (getline(file, line))
     {
-        vector<string> fields = split(line, '|');
-
-        if (fields.size() != 10)
+        if (!line.empty() && line.back() == '\r')
+        {
+            line.pop_back();
+        }
+        if (line.empty())
         {
             continue;
         }
 
-        RecordStatus status =
-            static_cast<RecordStatus>(stoi(fields[8]));
+        vector<string> fields = split(line, '|');
+        if (fields.size() != 10 && fields.size() != 15)
+        {
+            return false;
+        }
 
-        records.emplace_back(
-            fields[0],
-            fields[1],
-            fields[2],
-            fields[3],
-            stod(fields[4]),
-            fields[5],
-            fields[6],
-            fields[7],
-            status,
-            stod(fields[9]));
+        RecordStatus status;
+        double appliedDuration = 0.0;
+        if (!parseRecordStatus(fields[8], status) ||
+            !parseFiniteDouble(fields[4], appliedDuration))
+        {
+            return false;
+        }
+
+        if (fields.size() == 10)
+        {
+            double oldScore = 0.0;
+            if (!parseFiniteDouble(fields[9], oldScore))
+            {
+                return false;
+            }
+
+            auto record = VolunteerRecord::fromLegacyFields(
+                fields[0], fields[1], fields[2], fields[3], appliedDuration,
+                fields[5], fields[6], fields[7], status, oldScore);
+            if (!record.has_value())
+            {
+                return false;
+            }
+            loadedRecords.push_back(std::move(*record));
+            continue;
+        }
+
+        optional<double> finalDuration;
+        optional<double> settledCoefficient;
+        optional<double> finalScore;
+        if (!parseOptionalDouble(fields[10], finalDuration) ||
+            !parseOptionalDouble(fields[13], settledCoefficient) ||
+            !parseOptionalDouble(fields[14], finalScore))
+        {
+            return false;
+        }
+
+        auto record = VolunteerRecord::fromModernFields(
+            fields[0], fields[1], fields[2], fields[3], appliedDuration,
+            fields[5], fields[6], fields[7], status,
+            optionalField(fields[9]), finalDuration,
+            optionalField(fields[11]), optionalField(fields[12]),
+            settledCoefficient, finalScore);
+        if (!record.has_value())
+        {
+            return false;
+        }
+        loadedRecords.push_back(std::move(*record));
     }
 
-    return !file.bad();
+    if (file.bad())
+    {
+        return false;
+    }
+    records = std::move(loadedRecords);
+    return true;
 }
 
 bool DataManager::loadDiaries() /// AI大修
@@ -388,23 +555,7 @@ void DataManager::saveAdministrators() const /// AI大修
 void DataManager::saveRecords() const /// AI大修
 {
     ofstream file(dataRoot_ / "records.txt");
-    file << fixed << setprecision(2);
-
-    for (const VolunteerRecord &record : records)
-    {
-        file
-            << record.getRecordId() << "|"
-            << record.getStudentId() << "|"
-            << record.getCategoryId() << "|"
-            << record.getDate() << "|"
-            << record.getDuration() << "|"
-            << record.getPlace() << "|"
-            << record.getWitness() << "|"
-            << record.getDescription() << "|"
-            << static_cast<int>(record.getStatus()) << "|"
-            << record.getScore()
-            << '\n';
-    }
+    file << serializeRecords(records);
 }
 
 RecordLogPersistenceOutcome
@@ -745,12 +896,14 @@ double DataManager::calculateStudentScore(const string &studentId) const
     double total = 0.0;
     for (const VolunteerRecord &record : records)
     {
-        if (record.getStudentId() == studentId && record.getStatus() == RecordStatus::Approved)
+        if (record.getStudentId() == studentId &&
+            record.getStatus() == RecordStatus::Approved &&
+            record.getFinalScore().has_value())
         {
-            total += record.getScore();
+            total += *record.getFinalScore();
         }
     }
-    return total;
+    return normalizeScoreToOneDecimal(total);
 }
 
 double DataManager::calculateStudentScoreByDateRange(const string &studentId, const string &startDate, const string &endDate) const
@@ -758,12 +911,15 @@ double DataManager::calculateStudentScoreByDateRange(const string &studentId, co
     double total = 0.0;
     for (const VolunteerRecord &record : records)
     {
-        if (record.getStudentId() == studentId && record.getStatus() == RecordStatus::Approved && record.getDate() >= startDate && record.getDate() <= endDate)
+        if (record.getStudentId() == studentId &&
+            record.getStatus() == RecordStatus::Approved &&
+            record.getFinalScore().has_value() &&
+            record.getDate() >= startDate && record.getDate() <= endDate)
         {
-            total += record.getScore();
+            total += *record.getFinalScore();
         }
     }
-    return total;
+    return normalizeScoreToOneDecimal(total);
 }
 
 double DataManager::calculateStudentDurationByCategory(const string &studentId, const string &categoryId) const
@@ -773,10 +929,12 @@ double DataManager::calculateStudentDurationByCategory(const string &studentId, 
     {
         if (
             record.getStudentId() == studentId &&
-            record.getCategoryId() == categoryId &&
-            record.getStatus() == RecordStatus::Approved)
+            record.getStatus() == RecordStatus::Approved &&
+            record.getFinalCategoryId().has_value() &&
+            *record.getFinalCategoryId() == categoryId &&
+            record.getFinalDuration().has_value())
         {
-            totalDuration += record.getDuration();
+            totalDuration += *record.getFinalDuration();
         }
     }
     return totalDuration;

@@ -48,6 +48,8 @@ release/
 
 > 请保持 `release` 文件夹中的 DLL、插件目录和 `data` 目录完整，不要只单独复制 exe。
 
+Qt 程序从 exe 同级的 `data/` 读取运行数据，不依赖启动时的当前工作目录。
+
 已经验证：将整个 `release` 目录复制到独立目录，并移除 Qt / MinGW 的 PATH 环境后，程序仍可以正常启动和运行。
 
 ### 2.2 运行控制台版
@@ -304,7 +306,7 @@ build/leifeng_console.exe
 $env:PATH = "$QT\bin;$MINGW\bin;" + $env:PATH
 ```
 
-然后在项目根目录运行：
+Qt 从 `leifeng_qt.exe` 同级的 `data/` 读取运行数据；CMake 会在配置时补齐缺少的初始数据文件，不覆盖已有构建运行数据。程序可从任意当前工作目录启动；例如在项目根目录运行：
 
 ```powershell
 .\build\leifeng_qt.exe
@@ -345,6 +347,8 @@ Copy-Item .\build\leifeng_qt.exe .\release\校园雷锋日记.exe
 ```powershell
 Copy-Item -Recurse .\data .\release\data
 ```
+
+发布包必须保留 exe 同级的 `release/data/`；Qt 按可执行文件位置查找该目录，不依赖启动时的当前工作目录。
 
 ---
 

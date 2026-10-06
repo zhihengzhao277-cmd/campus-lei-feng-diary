@@ -13,7 +13,9 @@
 #include "student_main_window.h"
 #include "style_helper.h"
 
-LoginWindow::LoginWindow(QWidget *parent)
+LoginWindow::LoginWindow(
+    std::filesystem::path dataRoot,
+    QWidget *parent)
     : QWidget(parent),
       accountEdit(nullptr),
       passwordEdit(nullptr),
@@ -21,9 +23,10 @@ LoginWindow::LoginWindow(QWidget *parent)
       messageLabel(nullptr),
       systemTitleLabel(nullptr),
       systemSubtitleLabel(nullptr),
-      loginCard(nullptr)
+      loginCard(nullptr),
+      data(dataRoot)
 {
-    data.loadAll();
+    dataLoaded_ = data.loadAll();
 
     setWindowTitle("校园雷锋日记 - 登录");
     setMinimumSize(800, 520);
@@ -217,6 +220,11 @@ LoginWindow::LoginWindow(QWidget *parent)
         &QPushButton::clicked,
         this,
         &LoginWindow::handleLogin);
+}
+
+bool LoginWindow::dataLoaded() const
+{
+    return dataLoaded_;
 }
 
 void LoginWindow::handleLogin()

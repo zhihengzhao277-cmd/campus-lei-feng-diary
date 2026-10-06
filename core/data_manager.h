@@ -8,6 +8,7 @@
 #include "data_list.h"
 #include "diary_post.h"
 
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -23,6 +24,8 @@ struct RankingItem
 class DataManager
 {
 private:
+    std::filesystem::path dataRoot_;
+
     vector<Student> students;
     vector<Administrator> administrators;
     vector<VolunteerCategory> categories;
@@ -38,14 +41,15 @@ private:
 
 public:
     DataManager();
+    explicit DataManager(std::filesystem::path dataRoot);
 
-    void loadAll();
+    bool loadAll();
     void saveAll() const;
 
-    void loadStudents();
-    void loadAdministrators();
-    void loadRecords();
-    void loadDiaries();
+    bool loadStudents();
+    bool loadAdministrators();
+    bool loadRecords();
+    bool loadDiaries();
 
     void saveStudents() const;
     void saveAdministrators() const;

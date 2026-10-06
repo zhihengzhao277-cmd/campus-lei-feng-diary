@@ -5,23 +5,170 @@
 #include "volunteer_record.h"
 
 #include <cmath>
+#include <chrono>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <vector>
 
 using namespace std;
 
 namespace
 {
+class ScopedTemporaryDirectory
+{
+public:
+    explicit ScopedTemporaryDirectory(const string &label)
+    {
+        static unsigned long long nextId = 0;
+        const auto tick = chrono::steady_clock::now()
+                              .time_since_epoch()
+                              .count();
+        path_ = filesystem::temp_directory_path() /
+                ("leifeng_iu_arch_03b_" + label + "_" +
+                 to_string(tick) + "_" + to_string(++nextId));
+        filesystem::create_directories(path_);
+    }
+
+    ~ScopedTemporaryDirectory()
+    {
+        error_code error;
+        filesystem::remove_all(path_, error);
+    }
+
+    const filesystem::path &path() const
+    {
+        return path_;
+    }
+
+private:
+    filesystem::path path_;
+};
+
+class ScopedCurrentPath
+{
+public:
+    ScopedCurrentPath()
+        : originalPath_(filesystem::current_path())
+    {
+    }
+
+    ~ScopedCurrentPath()
+    {
+        error_code error;
+        filesystem::current_path(originalPath_, error);
+    }
+
+private:
+    filesystem::path originalPath_;
+};
+
 void require(bool condition, const string &message)
 {
     if (!condition)
     {
         throw runtime_error(message);
     }
+}
+
+void writeRuntimeFile(
+    const filesystem::path &root,
+    const string &filename,
+    const string &contents)
+{
+    ofstream file(root / filename, ios::binary);
+    require(file.is_open(), "synthetic runtime file should be writable");
+    file << contents;
+    require(file.good(), "synthetic runtime file should be written");
+}
+
+void createSyntheticRuntimeData(const filesystem::path &root)
+{
+    filesystem::create_directories(root);
+    writeRuntimeFile(
+        root,
+        "students.txt",
+        "S9001|Synthetic Student|unused|Class A|Major A\n");
+    writeRuntimeFile(
+        root,
+        "administrators.txt",
+        "A9001|Synthetic Admin|unused\n");
+    writeRuntimeFile(
+        root,
+        "records.txt",
+        "R9001|S9001|C01|2026/04/01|0.50|Campus|Witness|Synthetic record|0|0.00\n");
+    writeRuntimeFile(
+        root,
+        "diaries.txt",
+        "D9001|S9001|R9001|Synthetic diary|0|\n");
+}
+
+void testDataManagerLoadsFromExplicitSyntheticRoot()
+{
+    ScopedTemporaryDirectory temporaryDirectory("valid_root");
+    createSyntheticRuntimeData(temporaryDirectory.path());
+
+    DataManager data(temporaryDirectory.path());
+    require(data.loadAll(),
+            "all required files in an explicit data root should load");
+    require(data.getStudents().size() == 1,
+            "explicit data root should load its student file");
+    require(data.getAdministrators().size() == 1,
+            "explicit data root should load its administrator file");
+    require(data.getRecords().size() == 1,
+            "explicit data root should load its record file");
+    require(data.findDiaryByRecordId("R9001") != nullptr,
+            "explicit data root should load its diary file");
+}
+
+void testDataManagerReportsMissingRootOrRequiredFile()
+{
+    ScopedTemporaryDirectory temporaryDirectory("missing_files");
+
+    DataManager missingRoot(temporaryDirectory.path() / "absent");
+    require(!missingRoot.loadAll(),
+            "a missing data root should be reported as a load failure");
+
+    const filesystem::path partialRoot =
+        temporaryDirectory.path() / "partial";
+    filesystem::create_directories(partialRoot);
+    writeRuntimeFile(
+        partialRoot,
+        "students.txt",
+        "S9001|Synthetic Student|unused|Class A|Major A\n");
+    writeRuntimeFile(
+        partialRoot,
+        "administrators.txt",
+        "A9001|Synthetic Admin|unused\n");
+    writeRuntimeFile(
+        partialRoot,
+        "records.txt",
+        "R9001|S9001|C01|2026/04/01|0.50|Campus|Witness|Synthetic record|0|0.00\n");
+
+    DataManager missingDiary(partialRoot);
+    require(!missingDiary.loadAll(),
+            "a missing required data file should be reported as a load failure");
+}
+
+void testExplicitDataRootIgnoresProcessWorkingDirectory()
+{
+    ScopedTemporaryDirectory dataDirectory("cwd_data");
+    ScopedTemporaryDirectory unrelatedWorkingDirectory("unrelated_cwd");
+    createSyntheticRuntimeData(dataDirectory.path());
+
+    ScopedCurrentPath restoreCurrentPath;
+    filesystem::current_path(unrelatedWorkingDirectory.path());
+
+    DataManager data(dataDirectory.path());
+    require(data.loadAll(),
+            "an explicit absolute data root should load outside the project cwd");
+    require(data.findStudent("S9001") != nullptr,
+            "working directory changes should not redirect student loading");
 }
 
 void requireNear(double actual, double expected, const string &message)
@@ -324,6 +471,9 @@ int main()
         testStudentVolunteerModifyResubmitsRejectedRecord();
         testStudentVolunteerDeleteRejectsForeignAndApprovedRecords();
         testStudentVolunteerRejectsMissingTargets();
+        testDataManagerLoadsFromExplicitSyntheticRoot();
+        testDataManagerReportsMissingRootOrRequiredFile();
+        testExplicitDataRootIgnoresProcessWorkingDirectory();
         cout << "All core characterization checks passed." << endl;
         return 0;
     }

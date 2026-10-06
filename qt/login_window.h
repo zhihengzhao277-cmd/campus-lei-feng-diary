@@ -1,6 +1,8 @@
 #ifndef LOGIN_WINDOW_H
 #define LOGIN_WINDOW_H
 
+#include <filesystem>
+
 #include <QWidget>
 
 #include "data_manager.h"
@@ -27,6 +29,7 @@ private:
     QFrame *loginCard;
 
     DataManager data;
+    bool dataLoaded_ = false;
 
     StudentMainWindow *studentMainWindow = nullptr;
 
@@ -34,7 +37,11 @@ private:
         nullptr;
 
 public:
-    explicit LoginWindow(QWidget *parent = nullptr);
+    explicit LoginWindow(
+        std::filesystem::path dataRoot,
+        QWidget *parent = nullptr);
+
+    bool dataLoaded() const;
 
 private slots:
     void handleLogin();

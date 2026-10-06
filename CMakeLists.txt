@@ -5,6 +5,28 @@ project(CampusLeiFengDiary LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# The current single-config generators place leifeng_qt.exe in the binary
+# directory, so its runtime data directory is CMAKE_BINARY_DIR/data.
+set(LEIFENG_RUNTIME_DATA_DIR "${CMAKE_BINARY_DIR}/data")
+file(MAKE_DIRECTORY "${LEIFENG_RUNTIME_DATA_DIR}")
+
+foreach(LEIFENG_DATA_FILE
+    students.txt
+    administrators.txt
+    records.txt
+    diaries.txt
+)
+    set(LEIFENG_RUNTIME_DATA_FILE
+        "${LEIFENG_RUNTIME_DATA_DIR}/${LEIFENG_DATA_FILE}")
+    if(NOT EXISTS "${LEIFENG_RUNTIME_DATA_FILE}")
+        configure_file(
+            "${CMAKE_CURRENT_SOURCE_DIR}/data/${LEIFENG_DATA_FILE}"
+            "${LEIFENG_RUNTIME_DATA_FILE}"
+            COPYONLY
+        )
+    endif()
+endforeach()
+
 set(CMAKE_AUTOMOC ON)
 
 find_package(

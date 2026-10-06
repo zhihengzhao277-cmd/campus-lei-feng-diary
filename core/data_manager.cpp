@@ -3,9 +3,16 @@
 #include <fstream>
 #include <iomanip>
 #include <sstream>
+#include <utility>
 using namespace std;
 
 DataManager::DataManager()
+    : DataManager(std::filesystem::path("data"))
+{
+}
+
+DataManager::DataManager(std::filesystem::path dataRoot)
+    : dataRoot_(std::move(dataRoot))
 {
     initializeCategories();
 }
@@ -35,12 +42,12 @@ vector<string> DataManager::split(const string &text, char delimiter) /// AI写�
 
     return result;
 }
-void DataManager::loadAll()
+bool DataManager::loadAll()
 {
-    loadStudents();
-    loadAdministrators();
-    loadRecords();
-    loadDiaries();
+    return loadStudents() &&
+           loadAdministrators() &&
+           loadRecords() &&
+           loadDiaries();
 }
 /**
  * 保存所有数据的函数
@@ -53,9 +60,14 @@ void DataManager::saveAll() const
     saveRecords();        // 保存记录数据
     saveDiaries();        // 保存日记数据
 }
-void DataManager::loadStudents() /// AI大修
+bool DataManager::loadStudents() /// AI大修
 {
-    ifstream file("data/students.txt");
+    ifstream file(dataRoot_ / "students.txt");
+    if (!file.is_open())
+    {
+        return false;
+    }
+
     string line;
     students.clear();
     while (getline(file, line))
@@ -74,10 +86,17 @@ void DataManager::loadStudents() /// AI大修
             fields[3],
             fields[4]);
     }
+
+    return !file.bad();
 }
-void DataManager::loadAdministrators() /// AI大修
+bool DataManager::loadAdministrators() /// AI大修
 {
-    ifstream file("data/administrators.txt");
+    ifstream file(dataRoot_ / "administrators.txt");
+    if (!file.is_open())
+    {
+        return false;
+    }
+
     string line;
     administrators.clear();
 
@@ -92,10 +111,17 @@ void DataManager::loadAdministrators() /// AI大修
 
         administrators.emplace_back(fields[0], fields[1], fields[2]);
     }
+
+    return !file.bad();
 }
-void DataManager::loadRecords() /// AI大修
+bool DataManager::loadRecords() /// AI大修
 {
-    ifstream file("data/records.txt");
+    ifstream file(dataRoot_ / "records.txt");
+    if (!file.is_open())
+    {
+        return false;
+    }
+
     string line;
     records.clear();
 
@@ -123,13 +149,19 @@ void DataManager::loadRecords() /// AI大修
             status,
             stod(fields[9]));
     }
+
+    return !file.bad();
 }
 
-void DataManager::loadDiaries() /// AI大修
+bool DataManager::loadDiaries() /// AI大修
 {
-    ifstream file("data/diaries.txt");
-    string line;
+    ifstream file(dataRoot_ / "diaries.txt");
+    if (!file.is_open())
+    {
+        return false;
+    }
 
+    string line;
     diaryPosts.getItems().clear();
 
     while (getline(file, line))
@@ -166,11 +198,13 @@ void DataManager::loadDiaries() /// AI大修
 
         diaryPosts.add(diary);
     }
+
+    return !file.bad();
 }
 
 void DataManager::saveStudents() const /// AI大修
 {
-    ofstream file("data/students.txt");
+    ofstream file(dataRoot_ / "students.txt");
 
     for (const Student &student : students)
     {
@@ -186,7 +220,7 @@ void DataManager::saveStudents() const /// AI大修
 
 void DataManager::saveAdministrators() const /// AI大修
 {
-    ofstream file("data/administrators.txt");
+    ofstream file(dataRoot_ / "administrators.txt");
 
     for (const Administrator &admin : administrators)
     {
@@ -200,7 +234,7 @@ void DataManager::saveAdministrators() const /// AI大修
 
 void DataManager::saveRecords() const /// AI大修
 {
-    ofstream file("data/records.txt");
+    ofstream file(dataRoot_ / "records.txt");
     file << fixed << setprecision(2);
 
     for (const VolunteerRecord &record : records)
@@ -222,7 +256,7 @@ void DataManager::saveRecords() const /// AI大修
 
 void DataManager::saveDiaries() const /// AI大修
 {
-    ofstream file("data/diaries.txt");
+    ofstream file(dataRoot_ / "diaries.txt");
 
     for (const DiaryPost &diary :
          diaryPosts.getItems())

@@ -30,6 +30,7 @@
 #include "administrator.h"
 #include "data_manager.h"
 #include "volunteer_record.h"
+#include "volunteer_review_service.h"
 
 namespace
 {
@@ -1136,42 +1137,55 @@ void AdministratorMainWindow::approveSelectedRecord()
         return;
     }
 
-    VolunteerRecord *record =
-        dataManager->findRecord(
-            selectedRecordId);
-
-    if (record == nullptr ||
-        record->getStatus() !=
-            RecordStatus::Pending)
+    VolunteerReviewService reviewService(*dataManager);
+    const auto showReviewFailure = [this](
+                                       VolunteerReviewStatus status)
     {
+        QString message;
+        switch (status)
+        {
+        case VolunteerReviewStatus::RecordNotFound:
+            message = "所选志愿记录已不存在，请刷新后重试。";
+            break;
+        case VolunteerReviewStatus::RecordNotPending:
+            message = "该记录已不处于待审核状态，请刷新后重试。";
+            break;
+        case VolunteerReviewStatus::CategoryNotFound:
+            message = "该记录所属志愿类别不存在，无法计算通过积分。";
+            break;
+        case VolunteerReviewStatus::Success:
+            message = "审核操作未能完成，请刷新后重试。";
+            break;
+        }
+        QMessageBox::warning(this, "审核失败", message);
+    };
+
+    const VolunteerReviewOutcome preview =
+        reviewService.previewApprovalScore(selectedRecordId);
+    if (!preview.succeeded())
+    {
+        showReviewFailure(preview.status);
         return;
     }
-
-    double coefficient = 1.0;
-
-    if (record->getCategoryId() == "C01")
+    if (!preview.approvalScore.has_value())
     {
-        coefficient = 2.0;
+        QMessageBox::warning(
+            this,
+            "审核失败",
+            "暂时无法计算通过积分，请刷新后重试。");
+        return;
     }
-    else if (record->getCategoryId() == "C02")
-    {
-        coefficient = 1.5;
-    }
-
-    double finalScore =
-        record->getDuration() * coefficient;
 
     QMessageBox::StandardButton result =
         QMessageBox::question(
             this,
             "确认通过",
             "确定通过记录 " +
-                QString::fromStdString(
-                    record->getRecordId()) +
+                QString::fromStdString(selectedRecordId) +
                 " 吗？\n\n"
                 "审核通过后获得积分：" +
                 QString::number(
-                    finalScore,
+                    *preview.approvalScore,
                     'f',
                     2),
             QMessageBox::Yes |
@@ -1183,7 +1197,14 @@ void AdministratorMainWindow::approveSelectedRecord()
         return;
     }
 
-    record->approve(finalScore);
+    const VolunteerReviewOutcome approval =
+        reviewService.approve(selectedRecordId);
+    if (!approval.succeeded())
+    {
+        showReviewFailure(approval.status);
+        return;
+    }
+
     dataManager->saveRecords();
 
     refreshReviewPage();
@@ -1203,24 +1224,12 @@ void AdministratorMainWindow::rejectSelectedRecord()
         return;
     }
 
-    VolunteerRecord *record =
-        dataManager->findRecord(
-            selectedRecordId);
-
-    if (record == nullptr ||
-        record->getStatus() !=
-            RecordStatus::Pending)
-    {
-        return;
-    }
-
     QMessageBox::StandardButton result =
         QMessageBox::question(
             this,
             "确认驳回",
             "确定驳回记录 " +
-                QString::fromStdString(
-                    record->getRecordId()) +
+                QString::fromStdString(selectedRecordId) +
                 " 吗？",
             QMessageBox::Yes |
                 QMessageBox::No,
@@ -1231,7 +1240,31 @@ void AdministratorMainWindow::rejectSelectedRecord()
         return;
     }
 
-    record->reject();
+    VolunteerReviewService reviewService(*dataManager);
+    const VolunteerReviewOutcome rejection =
+        reviewService.reject(selectedRecordId);
+    if (!rejection.succeeded())
+    {
+        QString message;
+        switch (rejection.status)
+        {
+        case VolunteerReviewStatus::RecordNotFound:
+            message = "所选志愿记录已不存在，请刷新后重试。";
+            break;
+        case VolunteerReviewStatus::RecordNotPending:
+            message = "该记录已不处于待审核状态，请刷新后重试。";
+            break;
+        case VolunteerReviewStatus::CategoryNotFound:
+            message = "该记录所属志愿类别不存在。";
+            break;
+        case VolunteerReviewStatus::Success:
+            message = "审核操作未能完成，请刷新后重试。";
+            break;
+        }
+        QMessageBox::warning(this, "审核失败", message);
+        return;
+    }
+
     dataManager->saveRecords();
 
     refreshReviewPage();

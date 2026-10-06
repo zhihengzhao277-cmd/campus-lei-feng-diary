@@ -45,6 +45,8 @@ set(CORE_SOURCES
     core/data_manager.cpp
     core/student_volunteer_service.h
     core/student_volunteer_service.cpp
+    core/volunteer_review_service.h
+    core/volunteer_review_service.cpp
 )
 
 add_executable(

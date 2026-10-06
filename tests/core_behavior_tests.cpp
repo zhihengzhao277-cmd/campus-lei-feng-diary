@@ -4,6 +4,7 @@
 #include "student_volunteer_service.h"
 #include "volunteer_category.h"
 #include "volunteer_record.h"
+#include "volunteer_review_service.h"
 
 #include <cmath>
 #include <chrono>
@@ -15,6 +16,7 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 using namespace std;
@@ -532,6 +534,160 @@ void testStudentVolunteerRejectsMissingTargets()
     require(remove.status == StudentVolunteerStatus::RecordNotFound,
             "deletion should reject a missing record");
 }
+
+void testVolunteerReviewPreviewAndApprovalUseCurrentCategoryScore()
+{
+    DataManager data;
+    VolunteerReviewService service(data);
+
+    const vector<string> categoryIds = {"C01", "C02", "C03"};
+    for (const string &categoryId : categoryIds)
+    {
+        const string recordId = "R_REVIEW_" + categoryId;
+        data.addRecord(makeRecord(
+            recordId, "S_REVIEW", categoryId, "2026/06/01", 1.75,
+            RecordStatus::Pending, 0.0));
+
+        const VolunteerRecord *beforePreview = data.findRecord(recordId);
+        require(beforePreview != nullptr,
+                "synthetic review record should exist before preview");
+        const VolunteerReviewOutcome preview =
+            service.previewApprovalScore(recordId);
+        const VolunteerCategory *category = data.findCategory(categoryId);
+        require(category != nullptr,
+                "built-in review category should exist");
+        const double expectedScore =
+            category->calculateScore(beforePreview->getDuration());
+
+        require(preview.succeeded(),
+                "Pending record approval preview should succeed");
+        require(preview.approvalScore.has_value(),
+                "successful approval preview should return a score");
+        requireNear(*preview.approvalScore, expectedScore,
+                    "preview score should use VolunteerCategory calculation");
+
+        const VolunteerRecord *afterPreview = data.findRecord(recordId);
+        require(afterPreview != nullptr &&
+                    afterPreview->getStatus() == RecordStatus::Pending,
+                "approval preview should not change record status");
+        requireNear(afterPreview->getScore(), 0.0,
+                    "approval preview should not change stored score");
+
+        const VolunteerReviewOutcome approval = service.approve(recordId);
+        require(approval.succeeded(),
+                "Pending record approval should succeed");
+        require(approval.approvalScore.has_value(),
+                "successful approval should return its authoritative score");
+        requireNear(*approval.approvalScore, expectedScore,
+                    "approval should recalculate with current category data");
+
+        const VolunteerRecord *approved = data.findRecord(recordId);
+        require(approved != nullptr &&
+                    approved->getStatus() == RecordStatus::Approved,
+                "successful review should transition record to Approved");
+        requireNear(approved->getScore(), expectedScore,
+                    "Approved record should store category-calculated score");
+    }
+}
+
+void testVolunteerReviewRejectAndNonPendingGuards()
+{
+    DataManager data;
+    data.addRecord(makeRecord(
+        "R_REVIEW_REJECT", "S_REVIEW", "missing-category", "2026/06/02",
+        1.0, RecordStatus::Pending, 9.0));
+    data.addRecord(makeRecord(
+        "R_REVIEW_APPROVED", "S_REVIEW", "C01", "2026/06/03",
+        1.0, RecordStatus::Approved, 2.0));
+    data.addRecord(makeRecord(
+        "R_REVIEW_REJECTED", "S_REVIEW", "C02", "2026/06/04",
+        1.0, RecordStatus::Rejected, 0.0));
+    VolunteerReviewService service(data);
+
+    const VolunteerReviewOutcome rejection =
+        service.reject("R_REVIEW_REJECT");
+    require(rejection.succeeded(),
+            "Pending record should be rejectable without category lookup");
+    const VolunteerRecord *rejected = data.findRecord("R_REVIEW_REJECT");
+    require(rejected != nullptr &&
+                rejected->getStatus() == RecordStatus::Rejected,
+            "successful rejection should transition record to Rejected");
+    requireNear(rejected->getScore(), 0.0,
+                "rejection should preserve Domain score-reset behavior");
+
+    const vector<pair<string, RecordStatus>> nonPendingRecords = {
+        {"R_REVIEW_APPROVED", RecordStatus::Approved},
+        {"R_REVIEW_REJECTED", RecordStatus::Rejected}};
+    for (const auto &[recordId, expectedStatus] : nonPendingRecords)
+    {
+        const VolunteerRecord *before = data.findRecord(recordId);
+        require(before != nullptr,
+                "non-Pending review fixture should exist");
+        const double expectedScore = before->getScore();
+
+        require(service.previewApprovalScore(recordId).status ==
+                    VolunteerReviewStatus::RecordNotPending,
+                "preview should reject non-Pending records");
+        require(service.approve(recordId).status ==
+                    VolunteerReviewStatus::RecordNotPending,
+                "approval should reject non-Pending records");
+        require(service.reject(recordId).status ==
+                    VolunteerReviewStatus::RecordNotPending,
+                "rejection should reject non-Pending records");
+
+        const VolunteerRecord *after = data.findRecord(recordId);
+        require(after != nullptr && after->getStatus() == expectedStatus,
+                "non-Pending review attempts should preserve record status");
+        requireNear(after->getScore(), expectedScore,
+                    "non-Pending review attempts should preserve score");
+    }
+}
+
+void testVolunteerReviewReportsMissingRecordsAndCategories()
+{
+    DataManager data;
+    data.addRecord(makeRecord(
+        "R_REVIEW_NO_CATEGORY", "S_REVIEW", "missing-category",
+        "2026/06/05", 1.5, RecordStatus::Pending, 7.0));
+    data.addRecord(makeRecord(
+        "R_REVIEW_NO_CATEGORY_REJECT", "S_REVIEW", "also-missing",
+        "2026/06/06", 0.5, RecordStatus::Pending, 8.0));
+    VolunteerReviewService service(data);
+
+    require(service.previewApprovalScore("missing-record").status ==
+                VolunteerReviewStatus::RecordNotFound,
+            "preview should report a missing record");
+    require(service.approve("missing-record").status ==
+                VolunteerReviewStatus::RecordNotFound,
+            "approval should report a missing record");
+    require(service.reject("missing-record").status ==
+                VolunteerReviewStatus::RecordNotFound,
+            "rejection should report a missing record");
+
+    require(service.previewApprovalScore("R_REVIEW_NO_CATEGORY").status ==
+                VolunteerReviewStatus::CategoryNotFound,
+            "preview should report a missing category");
+    require(service.approve("R_REVIEW_NO_CATEGORY").status ==
+                VolunteerReviewStatus::CategoryNotFound,
+            "approval should report a missing category");
+    const VolunteerRecord *unchanged =
+        data.findRecord("R_REVIEW_NO_CATEGORY");
+    require(unchanged != nullptr &&
+                unchanged->getStatus() == RecordStatus::Pending,
+            "missing-category preview and approval should preserve status");
+    requireNear(unchanged->getScore(), 7.0,
+                "missing-category preview and approval should preserve score");
+
+    const VolunteerReviewOutcome rejection =
+        service.reject("R_REVIEW_NO_CATEGORY_REJECT");
+    require(rejection.succeeded(),
+            "missing category should not prevent Pending record rejection");
+    const VolunteerRecord *rejected =
+        data.findRecord("R_REVIEW_NO_CATEGORY_REJECT");
+    require(rejected != nullptr &&
+                rejected->getStatus() == RecordStatus::Rejected,
+            "category-independent rejection should update the record state");
+}
 }
 
 int main()
@@ -549,6 +705,9 @@ int main()
         testStudentVolunteerModifyResubmitsRejectedRecord();
         testStudentVolunteerDeleteRejectsForeignAndApprovedRecords();
         testStudentVolunteerRejectsMissingTargets();
+        testVolunteerReviewPreviewAndApprovalUseCurrentCategoryScore();
+        testVolunteerReviewRejectAndNonPendingGuards();
+        testVolunteerReviewReportsMissingRecordsAndCategories();
         testDataManagerLoadsFromExplicitSyntheticRoot();
         testDataManagerReportsMissingRootOrRequiredFile();
         testExplicitDataRootIgnoresProcessWorkingDirectory();

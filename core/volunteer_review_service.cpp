@@ -9,7 +9,7 @@
 
 namespace
 {
-bool reloadRecords(DataManager &dataManager) noexcept
+bool reloadRecords(DataManager &dataManager)
 {
     try
     {
@@ -21,7 +21,7 @@ bool reloadRecords(DataManager &dataManager) noexcept
     }
 }
 
-bool reloadLogs(DataManager &dataManager) noexcept
+bool reloadLogs(DataManager &dataManager)
 {
     try
     {
@@ -33,7 +33,7 @@ bool reloadLogs(DataManager &dataManager) noexcept
     }
 }
 
-bool restoreReviewState(DataManager &dataManager) noexcept
+bool restoreReviewState(DataManager &dataManager)
 {
     const bool recordsLoaded = reloadRecords(dataManager);
     const bool logsLoaded = reloadLogs(dataManager);

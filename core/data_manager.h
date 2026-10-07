@@ -13,12 +13,10 @@
 #include <string>
 #include <vector>
 
-using namespace std;
-
 struct RankingItem
 {
-    string studentId;
-    string studentName;
+    std::string studentId;
+    std::string studentName;
     double score;
 };
 
@@ -66,16 +64,16 @@ class DataManager
 private:
     std::filesystem::path dataRoot_;
 
-    vector<Student> students;
-    vector<Administrator> administrators;
-    vector<VolunteerCategory> categories;
-    vector<VolunteerRecord> records;
-    vector<OperationLog> operationLogs;
+    std::vector<Student> students;
+    std::vector<Administrator> administrators;
+    std::vector<VolunteerCategory> categories;
+    std::vector<VolunteerRecord> records;
+    std::vector<OperationLog> operationLogs;
 
     DataList<DiaryPost> diaryPosts;
 
-    static vector<string> split(
-        const string &text,
+    static std::vector<std::string> split(
+        const std::string &text,
         char delimiter);
 
     void initializeCategories();
@@ -102,22 +100,22 @@ public:
     DiaryPersistenceOutcome saveDiariesAndOperationLogs() const;
 
     Student *findStudent(
-        const string &accountId);
+        const std::string &accountId);
 
     Administrator *findAdministrator(
-        const string &accountId);
+        const std::string &accountId);
 
     VolunteerRecord *findRecord(
-        const string &recordId);
+        const std::string &recordId);
 
     const VolunteerCategory *findCategory(
-        const string &categoryId) const;
+        const std::string &categoryId) const;
 
     void addRecord(
         const VolunteerRecord &record);
 
     bool deleteRecord(
-        const string &recordId);
+        const std::string &recordId);
 
     void addStudent(
         const Student &student);
@@ -125,50 +123,50 @@ public:
     void addAdministrator(
         const Administrator &administrator);
 
-    string generateRecordId() const;
-    string generateOperationLogId() const;
+    std::string generateRecordId() const;
+    std::string generateOperationLogId() const;
 
     void addOperationLog(const OperationLog &log);
 
     double calculateStudentScore(
-        const string &studentId) const;
+        const std::string &studentId) const;
 
     double calculateStudentScoreByDateRange(
-        const string &studentId,
-        const string &startDate,
-        const string &endDate) const;
+        const std::string &studentId,
+        const std::string &startDate,
+        const std::string &endDate) const;
 
     double calculateStudentDurationByCategory(
-        const string &studentId,
-        const string &categoryId) const;
+        const std::string &studentId,
+        const std::string &categoryId) const;
 
-    vector<RankingItem> generateRanking() const;
+    std::vector<RankingItem> generateRanking() const;
 
-    const vector<Student> &
+    const std::vector<Student> &
     getStudents() const;
 
-    const vector<Administrator> &
+    const std::vector<Administrator> &
     getAdministrators() const;
 
-    const vector<VolunteerCategory> &
+    const std::vector<VolunteerCategory> &
     getCategories() const;
 
-    const vector<VolunteerRecord> &
+    const std::vector<VolunteerRecord> &
     getRecords() const;
 
-    const vector<OperationLog> &
+    const std::vector<OperationLog> &
     getOperationLogs() const;
 
     void addDiary(
         const DiaryPost &diary);
 
     DiaryPost *findDiaryByRecordId(
-        const string &recordId);
+        const std::string &recordId);
 
     DiaryPost *findDiary(
-        const string &diaryId);
+        const std::string &diaryId);
 
-    string generateDiaryId() const;
+    std::string generateDiaryId() const;
 
     const DataList<DiaryPost> &
     getDiaries() const;

@@ -326,11 +326,11 @@ DataManager::DataManager(std::filesystem::path dataRoot)
 void DataManager::initializeCategories()
 {
     categories.clear();
-    categories.emplace_back("C01", "劳动服务", 2.0); /// 原本push_back,AI改成emplace_back
+    categories.emplace_back("C01", "劳动服务", 2.0);
     categories.emplace_back("C02", "环保服务", 1.5);
     categories.emplace_back("C03", "互助服务", 1.0);
 }
-vector<string> DataManager::split(const string &text, char delimiter) /// AI写的
+vector<string> DataManager::split(const string &text, char delimiter)
 {
     vector<string> result;
     string item;
@@ -357,18 +357,15 @@ bool DataManager::loadAll()
            loadDiaries() &&
            loadOperationLogs();
 }
-/**
- * 保存所有数据的函数
- * 该函数依次调用各个数据保存方法，将学生、管理员、记录和日记数据全部保存
- */
+// Console 兼容路径：保存学生、管理员、志愿记录和日记，不包含操作日志。
 void DataManager::saveAll() const
 {
-    saveStudents();       // 保存学生数据
-    saveAdministrators(); // 保存管理员数据
-    saveRecords();        // 保存记录数据
-    saveDiaries();        // 保存日记数据
+    saveStudents();
+    saveAdministrators();
+    saveRecords();
+    saveDiaries();
 }
-bool DataManager::loadStudents() /// AI大修
+bool DataManager::loadStudents()
 {
     ifstream file(dataRoot_ / "students.txt");
     if (!file.is_open())
@@ -397,7 +394,7 @@ bool DataManager::loadStudents() /// AI大修
 
     return !file.bad();
 }
-bool DataManager::loadAdministrators() /// AI大修
+bool DataManager::loadAdministrators()
 {
     ifstream file(dataRoot_ / "administrators.txt");
     if (!file.is_open())
@@ -422,7 +419,7 @@ bool DataManager::loadAdministrators() /// AI大修
 
     return !file.bad();
 }
-bool DataManager::loadRecords() /// AI大修
+bool DataManager::loadRecords()
 {
     ifstream file(dataRoot_ / "records.txt");
     if (!file.is_open())
@@ -507,7 +504,7 @@ bool DataManager::loadRecords() /// AI大修
     return true;
 }
 
-bool DataManager::loadDiaries() /// AI大修
+bool DataManager::loadDiaries()
 {
     ifstream file(dataRoot_ / "diaries.txt");
     if (!file.is_open())
@@ -638,7 +635,7 @@ bool DataManager::loadOperationLogs()
     return true;
 }
 
-void DataManager::saveStudents() const /// AI大修
+void DataManager::saveStudents() const
 {
     ofstream file(dataRoot_ / "students.txt");
 
@@ -654,7 +651,7 @@ void DataManager::saveStudents() const /// AI大修
     }
 }
 
-void DataManager::saveAdministrators() const /// AI大修
+void DataManager::saveAdministrators() const
 {
     ofstream file(dataRoot_ / "administrators.txt");
 
@@ -668,7 +665,7 @@ void DataManager::saveAdministrators() const /// AI大修
     }
 }
 
-void DataManager::saveRecords() const /// AI大修
+void DataManager::saveRecords() const
 {
     ofstream file(dataRoot_ / "records.txt");
     file << serializeRecords(records);
@@ -942,7 +939,7 @@ DiaryPost *DataManager::findDiaryByRecordId(const string &recordId)
     return nullptr;
 }
 
-string DataManager::generateRecordId() const /// 我的思路，AI代写（stringstream）
+string DataManager::generateRecordId() const
 {
     int maxNumber = 0;
 
@@ -1035,7 +1032,7 @@ void DataManager::addOperationLog(const OperationLog &log)
 {
     operationLogs.push_back(log);
 }
-string DataManager::generateDiaryId() const /// 我的思路，AI代写（stringstream）
+string DataManager::generateDiaryId() const
 {
     int maxNumber = 0;
 

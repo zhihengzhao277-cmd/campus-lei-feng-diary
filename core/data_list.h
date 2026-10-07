@@ -1,15 +1,14 @@
 #ifndef DATA_LIST_H
 #define DATA_LIST_H
 
+#include <cstddef>
 #include <vector>
-
-using namespace std;
 
 template <typename T>
 class DataList
 {
 private:
-    vector<T> items;
+    std::vector<T> items;
 
 public:
     void add(const T &item)
@@ -17,17 +16,17 @@ public:
         items.push_back(item);
     }
 
-    vector<T> &getItems()
+    std::vector<T> &getItems()
     {
         return items;
     }
 
-    const vector<T> &getItems() const
+    const std::vector<T> &getItems() const
     {
         return items;
     }
 
-    size_t size() const
+    std::size_t size() const
     {
         return items.size();
     }

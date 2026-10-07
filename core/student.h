@@ -1,18 +1,18 @@
 #ifndef STUDENT_H
 #define STUDENT_H
 #include "user.h"
-using namespace std;
+#include <string>
 
 class Student : public User
 {
 private:
-    string className;
-    string major;
+    std::string className;
+    std::string major;
 
 public:
-    Student(const string &accountId, const string &name, const string &password, const string &className, const string &major);
-    string getClassName() const;
-    string getMajor() const;
+    Student(const std::string &accountId, const std::string &name, const std::string &password, const std::string &className, const std::string &major);
+    std::string getClassName() const;
+    std::string getMajor() const;
     void showMenu() const override;
 };
 #endif

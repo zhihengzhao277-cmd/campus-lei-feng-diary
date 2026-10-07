@@ -169,6 +169,21 @@ namespace
         return "未知状态";
     }
 
+    QColor diaryDisplayStatusColor(DiaryDisplayStatus status)
+    {
+        switch (status)
+        {
+        case DiaryDisplayStatus::PendingDisplayReview:
+            return QColor("#B7791F");
+        case DiaryDisplayStatus::Displayed:
+            return QColor("#2F855A");
+        case DiaryDisplayStatus::Rejected:
+        case DiaryDisplayStatus::TakenDown:
+            return QColor("#C2413A");
+        }
+        return QColor("#68717D");
+    }
+
     QString diaryServiceFailureMessage(DiaryServiceStatus status)
     {
         switch (status)
@@ -309,7 +324,8 @@ AdministratorMainWindow::AdministratorMainWindow(
 void AdministratorMainWindow::buildInterface()
 {
     setStyleSheet(
-        StyleHelper::pageBackground());
+        StyleHelper::pageBackground() +
+        StyleHelper::applicationShell());
 
     QVBoxLayout *mainLayout =
         new QVBoxLayout(this);
@@ -328,24 +344,12 @@ void AdministratorMainWindow::buildInterface()
 
     QHBoxLayout *topLayout =
         new QHBoxLayout;
+    topLayout->setSpacing(12);
 
     QLabel *systemTitle =
         new QLabel(
             "校园雷锋日记 · 管理后台");
-
-    QFont systemFont =
-        systemTitle->font();
-
-    systemFont.setPointSize(18);
-    systemFont.setBold(true);
-
-    systemTitle->setFont(systemFont);
-
-    systemTitle->setStyleSheet(
-        "QLabel {"
-        "color: #222222;"
-        "background: transparent;"
-        "}");
+    systemTitle->setObjectName("applicationSystemTitle");
 
     QString administratorName =
         "未知管理员";
@@ -372,30 +376,13 @@ void AdministratorMainWindow::buildInterface()
             QString::fromStdString(
                 accountId) +
             "）");
-
-    welcomeLabel->setStyleSheet(
-        "QLabel {"
-        "color: #555555;"
-        "background: transparent;"
-        "}");
+    welcomeLabel->setObjectName("applicationUserIdentity");
 
     QPushButton *logoutButton =
         new QPushButton("退出登录");
-
-    logoutButton->setMinimumSize(
-        90,
-        36);
-
-    logoutButton->setStyleSheet(
-        "QPushButton {"
-        "background-color: white;"
-        "color: #555555;"
-        "border: 1px solid #dddddd;"
-        "border-radius: 9px;"
-        "}"
-        "QPushButton:hover {"
-        "background-color: #eeeeee;"
-        "}");
+    logoutButton->setObjectName("applicationLogoutButton");
+    logoutButton->setMinimumSize(90, 36);
+    logoutButton->setCursor(Qt::PointingHandCursor);
 
     topLayout->addWidget(
         systemTitle);
@@ -603,10 +590,15 @@ void AdministratorMainWindow::buildHomePage()
     quickLayout->addWidget(quickTitle);
     quickLayout->addWidget(quickSubtitle);
 
-    QHBoxLayout *actionsLayout = new QHBoxLayout;
-    actionsLayout->setSpacing(8);
+    QGridLayout *actionsLayout = new QGridLayout;
+    actionsLayout->setHorizontalSpacing(8);
+    actionsLayout->setVerticalSpacing(8);
     QPushButton *reviewButton = new QPushButton("志愿审核");
     reviewButton->setObjectName("adminDashboardPrimaryAction");
+    QPushButton *diaryButton = new QPushButton("日记管理");
+    diaryButton->setObjectName("adminDashboardAction");
+    QPushButton *operationLogButton = new QPushButton("操作日志");
+    operationLogButton->setObjectName("adminDashboardAction");
     QPushButton *statisticsButton = new QPushButton("数据统计");
     statisticsButton->setObjectName("adminDashboardAction");
     QPushButton *createStudentButton = new QPushButton("创建学生");
@@ -617,14 +609,21 @@ void AdministratorMainWindow::buildHomePage()
 
     for (QPushButton *button :
          {reviewButton,
+          diaryButton,
+          operationLogButton,
           statisticsButton,
           createStudentButton,
           createAdministratorButton})
     {
         button->setCursor(Qt::PointingHandCursor);
         button->setMinimumHeight(40);
-        actionsLayout->addWidget(button, 1);
     }
+    actionsLayout->addWidget(reviewButton, 0, 0);
+    actionsLayout->addWidget(diaryButton, 0, 1);
+    actionsLayout->addWidget(operationLogButton, 0, 2);
+    actionsLayout->addWidget(statisticsButton, 1, 0);
+    actionsLayout->addWidget(createStudentButton, 1, 1);
+    actionsLayout->addWidget(createAdministratorButton, 1, 2);
     quickLayout->addLayout(actionsLayout);
     mainLayout->addWidget(quickSection);
     mainLayout->addStretch(1);
@@ -637,6 +636,10 @@ void AdministratorMainWindow::buildHomePage()
             this, [this]() { navigationList->setCurrentRow(3); });
     connect(createAdministratorButton, &QPushButton::clicked,
             this, [this]() { navigationList->setCurrentRow(4); });
+    connect(operationLogButton, &QPushButton::clicked,
+            this, [this]() { navigationList->setCurrentRow(6); });
+    connect(diaryButton, &QPushButton::clicked,
+            this, [this]() { navigationList->setCurrentRow(7); });
 
     refreshHomePage();
 }
@@ -1674,7 +1677,7 @@ void AdministratorMainWindow::buildOperationLogPage()
     QLabel *titleLabel = new QLabel("操作日志");
     titleLabel->setObjectName("adminOperationLogTitle");
     QLabel *subtitleLabel = new QLabel(
-        "查看管理员对志愿记录执行的审核操作及审计信息。");
+        "查看管理员对志愿审核与日记治理执行的操作及审计信息。");
     subtitleLabel->setObjectName("adminOperationLogSubtitle");
     mainLayout->addWidget(titleLabel);
     mainLayout->addWidget(subtitleLabel);
@@ -1687,11 +1690,19 @@ QFrame *AdministratorMainWindow::buildOperationLogFilterCard()
 {
     QFrame *filterCard = new QFrame;
     filterCard->setObjectName("adminOperationLogFilterCard");
-    QHBoxLayout *filterLayout = new QHBoxLayout(filterCard);
-    filterLayout->setContentsMargins(16, 14, 16, 14);
-    filterLayout->setSpacing(10);
-    addOperationLogTypeFilter(filterLayout);
-    addOperationLogTargetFilter(filterLayout);
+    QVBoxLayout *filterLayout = new QVBoxLayout(filterCard);
+    filterLayout->setContentsMargins(16, 12, 16, 12);
+    filterLayout->setSpacing(8);
+
+    QHBoxLayout *typeRow = new QHBoxLayout;
+    typeRow->setSpacing(10);
+    addOperationLogTypeFilter(typeRow);
+    typeRow->addStretch(1);
+    filterLayout->addLayout(typeRow);
+
+    QHBoxLayout *targetRow = new QHBoxLayout;
+    targetRow->setSpacing(8);
+    addOperationLogTargetFilter(targetRow);
 
     QPushButton *clearButton = new QPushButton("清除筛选");
     clearButton->setObjectName("adminOperationLogClearButton");
@@ -1699,8 +1710,10 @@ QFrame *AdministratorMainWindow::buildOperationLogFilterCard()
     QPushButton *refreshButton = new QPushButton("查询 / 刷新");
     refreshButton->setObjectName("adminOperationLogRefreshButton");
     refreshButton->setCursor(Qt::PointingHandCursor);
-    filterLayout->addWidget(clearButton);
-    filterLayout->addWidget(refreshButton);
+    targetRow->addStretch(1);
+    targetRow->addWidget(clearButton);
+    targetRow->addWidget(refreshButton);
+    filterLayout->addLayout(targetRow);
     connectOperationLogFilters(clearButton, refreshButton);
     return filterCard;
 }
@@ -1749,6 +1762,7 @@ void AdministratorMainWindow::addOperationLogTargetFilter(
     operationLogTargetTypeFilter->addItem(
         "日记",
         static_cast<int>(OperationTargetType::DiaryPost));
+    operationLogTargetTypeFilter->setMinimumWidth(130);
 
     QLabel *label = new QLabel("目标编号");
     label->setObjectName("adminOperationLogFieldLabel");
@@ -1756,7 +1770,7 @@ void AdministratorMainWindow::addOperationLogTargetFilter(
     operationLogTargetIdEdit->setObjectName(
         "adminOperationLogTargetFilter");
     operationLogTargetIdEdit->setPlaceholderText("输入志愿记录编号");
-    operationLogTargetIdEdit->setMinimumWidth(190);
+    operationLogTargetIdEdit->setMinimumWidth(145);
     layout->addWidget(typeLabel);
     layout->addWidget(operationLogTargetTypeFilter);
     layout->addWidget(label);
@@ -1817,7 +1831,7 @@ QFrame *AdministratorMainWindow::buildOperationLogTableCard()
     tableLayout->setContentsMargins(16, 14, 16, 16);
     tableLayout->setSpacing(10);
 
-    QLabel *tableTitle = new QLabel("审核操作记录");
+    QLabel *tableTitle = new QLabel("操作记录明细");
     tableTitle->setObjectName("adminOperationLogSectionTitle");
     tableLayout->addWidget(tableTitle);
 
@@ -1841,6 +1855,7 @@ void AdministratorMainWindow::configureOperationLogTable()
         QAbstractItemView::SingleSelection);
     operationLogTable->setAlternatingRowColors(true);
     operationLogTable->setShowGrid(false);
+    operationLogTable->setTextElideMode(Qt::ElideRight);
     operationLogTable->verticalHeader()->setVisible(false);
     operationLogTable->verticalHeader()->setDefaultSectionSize(42);
     operationLogTable->horizontalHeader()->setSectionResizeMode(
@@ -2104,6 +2119,14 @@ void AdministratorMainWindow::refreshDiaryManagementPage()
                 item->setData(
                     Qt::UserRole,
                     QString::fromStdString(diary.diaryId));
+            }
+            if (column == 4)
+            {
+                item->setForeground(
+                    diaryDisplayStatusColor(diary.displayStatus));
+                QFont statusFont = item->font();
+                statusFont.setBold(true);
+                item->setFont(statusFont);
             }
             diaryManagementTable->setItem(row, column, item);
         }

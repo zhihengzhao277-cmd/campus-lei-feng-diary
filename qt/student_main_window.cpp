@@ -33,6 +33,7 @@
 #include <QMessageBox>
 #include <QScrollArea>
 #include <QFrame>
+#include <QGridLayout>
 #include <QGraphicsOpacityEffect>
 #include <QIcon>
 #include <QPixmap>
@@ -150,6 +151,21 @@ namespace
             return "已下架";
         }
         return "未知状态";
+    }
+
+    QColor diaryDisplayStatusColor(DiaryDisplayStatus status)
+    {
+        switch (status)
+        {
+        case DiaryDisplayStatus::PendingDisplayReview:
+            return QColor("#B7791F");
+        case DiaryDisplayStatus::Displayed:
+            return QColor("#2F855A");
+        case DiaryDisplayStatus::Rejected:
+        case DiaryDisplayStatus::TakenDown:
+            return QColor("#C2413A");
+        }
+        return QColor("#68717D");
     }
 
     enum class StudentVolunteerOperation
@@ -830,18 +846,23 @@ StudentMainWindow::StudentMainWindow(
 void StudentMainWindow::buildInterface()
 {
     setStyleSheet(
-        StyleHelper::pageBackground());
+        StyleHelper::pageBackground() +
+        StyleHelper::applicationShell());
 
     QVBoxLayout *mainLayout =
         new QVBoxLayout(this);
+    mainLayout->setContentsMargins(18, 14, 18, 18);
+    mainLayout->setSpacing(14);
 
     // ===== 顶部区域 =====
 
     QHBoxLayout *topLayout =
         new QHBoxLayout;
+    topLayout->setSpacing(12);
 
     QLabel *systemTitle =
         new QLabel("校园雷锋日记");
+    systemTitle->setObjectName("applicationSystemTitle");
 
     QString studentName = "未知学生";
 
@@ -865,9 +886,13 @@ void StudentMainWindow::buildInterface()
             "（" +
             QString::fromStdString(accountId) +
             "）");
+    welcomeLabel->setObjectName("applicationUserIdentity");
 
     QPushButton *logoutButton =
         new QPushButton("退出登录");
+    logoutButton->setObjectName("applicationLogoutButton");
+    logoutButton->setMinimumSize(90, 36);
+    logoutButton->setCursor(Qt::PointingHandCursor);
 
     topLayout->addWidget(systemTitle);
 
@@ -882,6 +907,7 @@ void StudentMainWindow::buildInterface()
 
     QHBoxLayout *bodyLayout =
         new QHBoxLayout;
+    bodyLayout->setSpacing(16);
 
     navigationList =
         new QListWidget;
@@ -1016,21 +1042,38 @@ void StudentMainWindow::buildHomePage()
     actionsLayout->setSpacing(10);
     QLabel *actionsTitle = new QLabel("常用入口");
     actionsTitle->setObjectName("dashboardSectionTitle");
-    QHBoxLayout *actionsButtons = new QHBoxLayout;
-    actionsButtons->setSpacing(8);
-    QPushButton *recordsButton = new QPushButton("我的志愿记录");
-    recordsButton->setObjectName("dashboardActionButton");
+    QGridLayout *actionsButtons = new QGridLayout;
+    actionsButtons->setHorizontalSpacing(8);
+    actionsButtons->setVerticalSpacing(8);
     QPushButton *submitButton = new QPushButton("提交志愿记录");
     submitButton->setObjectName("dashboardPrimaryActionButton");
+    QPushButton *recordsButton = new QPushButton("我的志愿记录");
+    recordsButton->setObjectName("dashboardActionButton");
+    QPushButton *scoreButton = new QPushButton("我的积分");
+    scoreButton->setObjectName("dashboardActionButton");
     QPushButton *rankingButton = new QPushButton("查看排行榜");
     rankingButton->setObjectName("dashboardActionButton");
+    QPushButton *badgeButton = new QPushButton("我的徽章");
+    badgeButton->setObjectName("dashboardActionButton");
+    QPushButton *diaryButton = new QPushButton("日记墙");
+    diaryButton->setObjectName("dashboardActionButton");
     for (QPushButton *button :
-         {recordsButton, submitButton, rankingButton})
+         {submitButton,
+          recordsButton,
+          scoreButton,
+          rankingButton,
+          badgeButton,
+          diaryButton})
     {
         button->setCursor(Qt::PointingHandCursor);
-        button->setMinimumHeight(38);
-        actionsButtons->addWidget(button);
+        button->setMinimumHeight(40);
     }
+    actionsButtons->addWidget(submitButton, 0, 0);
+    actionsButtons->addWidget(recordsButton, 0, 1);
+    actionsButtons->addWidget(scoreButton, 0, 2);
+    actionsButtons->addWidget(rankingButton, 1, 0);
+    actionsButtons->addWidget(badgeButton, 1, 1);
+    actionsButtons->addWidget(diaryButton, 1, 2);
     actionsLayout->addWidget(actionsTitle);
     actionsLayout->addLayout(actionsButtons);
     layout->addWidget(actionsSection);
@@ -1041,6 +1084,12 @@ void StudentMainWindow::buildHomePage()
             this, [this]() { navigationList->setCurrentRow(2); });
     connect(rankingButton, &QPushButton::clicked,
             this, [this]() { navigationList->setCurrentRow(4); });
+    connect(scoreButton, &QPushButton::clicked,
+            this, [this]() { navigationList->setCurrentRow(3); });
+    connect(badgeButton, &QPushButton::clicked,
+            this, [this]() { navigationList->setCurrentRow(5); });
+    connect(diaryButton, &QPushButton::clicked,
+            this, [this]() { navigationList->setCurrentRow(6); });
 
     QFrame *badgesSection = new QFrame;
     badgesSection->setObjectName("dashboardSection");
@@ -3568,10 +3617,19 @@ void StudentMainWindow::refreshDiaryApplications()
             publishedAt};
         for (int column = 0; column < values.size(); ++column)
         {
+            QTableWidgetItem *item = new QTableWidgetItem(values[column]);
+            if (column == 3)
+            {
+                item->setForeground(
+                    diaryDisplayStatusColor(application.displayStatus));
+                QFont statusFont = item->font();
+                statusFont.setBold(true);
+                item->setFont(statusFont);
+            }
             diaryApplicationsTable->setItem(
                 row,
                 column,
-                new QTableWidgetItem(values[column]));
+                item);
         }
     }
 }

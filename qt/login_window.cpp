@@ -220,6 +220,12 @@ LoginWindow::LoginWindow(
         &QPushButton::clicked,
         this,
         &LoginWindow::handleLogin);
+
+    connect(
+        passwordEdit,
+        &QLineEdit::returnPressed,
+        this,
+        &LoginWindow::handleLogin);
 }
 
 bool LoginWindow::dataLoaded() const

@@ -18,6 +18,8 @@ public:
 
     static QString profilePages();
 
+    static QString applicationShell();
+
     static QString administratorDashboard();
 
     static QString administratorReviewPage();

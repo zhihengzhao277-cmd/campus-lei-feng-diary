@@ -94,8 +94,19 @@ QVariant OperationLogTableModel::data(
     const QModelIndex &index,
     int role) const
 {
-    if (!index.isValid() || role != Qt::DisplayRole ||
+    if (!index.isValid() ||
         index.row() < 0 || index.row() >= static_cast<int>(results_.size()))
+    {
+        return {};
+    }
+
+    if (role == Qt::ToolTipRole && index.column() == 6)
+    {
+        return QString::fromStdString(
+            results_[static_cast<size_t>(index.row())].description);
+    }
+
+    if (role != Qt::DisplayRole)
     {
         return {};
     }

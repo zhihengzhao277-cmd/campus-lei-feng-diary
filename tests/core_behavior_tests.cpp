@@ -382,6 +382,8 @@ void testDiaryServicePublishesOnlyApprovedPostsWithRecordOwnerFacts()
             "public author name should come from the linked record owner");
     require(feed[0].categoryName == "环保服务",
             "public category should use the final reviewed category");
+    requireNear(feed[0].score, 3.0,
+                "public score should use the final reviewed score");
     require(feed[0].serviceDate == "2026/05/01",
             "public service date should come from the linked record");
     requireNear(feed[0].durationHours, 2.0,
@@ -414,6 +416,458 @@ void testDiaryServiceReturnsEmptyForIneligiblePosts()
     DiaryService service(data);
     require(service.queryPublicFeed("S_VIEWER").empty(),
             "feed should be empty when no post has both an Approved record and owner student");
+}
+
+void testDiaryLoaderSupportsTheApprovedModernRowShape()
+{
+    ScopedTemporaryDirectory temporaryDirectory(
+        "diary_modern_row_shape");
+    createSyntheticRuntimeData(temporaryDirectory.path());
+    writeRuntimeFile(
+        temporaryDirectory.path(),
+        "diaries.txt",
+        "D9001|S9001|R9001|Legacy diary|1|S9001\n"
+        "D9002|R9002|Modern title|Modern content|PendingDisplayReview||0|\n"
+        "D9003|R9003|Modern displayed|Public content|Displayed|2026-10-07T12:34:56|0|\n");
+
+    DataManager data(temporaryDirectory.path());
+    require(data.loadDiaries(),
+            "valid legacy and modern diary rows should load together");
+    const vector<DiaryPost> &loaded = data.getDiaries().getItems();
+    require(loaded.size() == 3,
+            "the loader should retain legacy, modern pending and modern displayed rows");
+    require(loaded[0].getDiaryId() == "D9001" &&
+                loaded[0].getMessage() == "Legacy diary" &&
+                loaded[1].getDiaryId() == "D9002" &&
+                loaded[1].getMessage() == "Modern content" &&
+                loaded[2].getDiaryId() == "D9003" &&
+                loaded[2].getDisplayStatus() == DiaryDisplayStatus::Displayed &&
+                loaded[2].getPublishedAt() ==
+                    optional<string>("2026-10-07T12:34:56"),
+            "loading should preserve legacy content and validate modern displayed publication time");
+
+    data.addDiary(DiaryPost(
+        "D_KEEP", "S9001", "R_KEEP", "Keep on failed load"));
+    writeRuntimeFile(
+        temporaryDirectory.path(),
+        "diaries.txt",
+        "D9001|S9001|R9001|Valid row|0|\n"
+        "D9002|R9002||Modern content|Displayed||0|\n");
+    require(!data.loadDiaries(),
+            "an eight-field Displayed row without a modern title and time must fail the full load");
+    require(data.getDiaries().size() == 4 &&
+                data.findDiary("D_KEEP") != nullptr,
+            "a failed diary load must not publish a partial collection");
+}
+
+void testDiaryLoaderEnforcesLikePersistenceInvariants()
+{
+    const auto loadSingleDiaryRow = [](const string &label, const string &row)
+    {
+        ScopedTemporaryDirectory temporaryDirectory(label);
+        createSyntheticRuntimeData(temporaryDirectory.path());
+        writeRuntimeFile(
+            temporaryDirectory.path(), "diaries.txt", row);
+        DataManager data(temporaryDirectory.path());
+        return data.loadDiaries();
+    };
+
+    require(loadSingleDiaryRow(
+                "diary_like_legacy_valid",
+                "D_LEGACY|S9001|R_LEGACY|Legacy body|1|S9001\n"),
+            "a six-field legacy Displayed row with one matching like should load");
+    require(!loadSingleDiaryRow(
+                "diary_like_legacy_mismatch",
+                "D_LEGACY_BAD|S9001|R_LEGACY_BAD|Legacy body|2|S9001\n"),
+            "legacy likeCount must equal the number of liked student IDs");
+    require(loadSingleDiaryRow(
+                "diary_like_modern_displayed",
+                "D_MODERN|R_MODERN|Title|Body|Displayed|2026-10-07T12:34:56|1|S9001\n"),
+            "a modern Displayed row with a title, valid time and matching like should load");
+    require(!loadSingleDiaryRow(
+                "diary_like_pending_state",
+                "D_PENDING_LIKE|R_PENDING_LIKE|Title|Body|PendingDisplayReview||1|S9001\n"),
+            "PendingDisplayReview rows must not contain persisted likes");
+    require(!loadSingleDiaryRow(
+                "diary_like_rejected_state",
+                "D_REJECTED_LIKE|R_REJECTED_LIKE|Title|Body|Rejected||1|S9001\n"),
+            "Rejected rows must not contain persisted likes");
+    require(!loadSingleDiaryRow(
+                "diary_like_modern_mismatch",
+                "D_MODERN_BAD|R_MODERN_BAD|Title|Body|Displayed|2026-10-07T12:34:56|2|S9001\n"),
+            "modern likeCount must equal the number of liked student IDs");
+    require(!loadSingleDiaryRow(
+                "diary_like_modern_duplicate",
+                "D_MODERN_DUP|R_MODERN_DUP|Title|Body|Displayed|2026-10-07T12:34:56|2|S9001,S9001\n"),
+            "duplicate liked student IDs must remain invalid");
+    require(!loadSingleDiaryRow(
+                "diary_like_legacy_empty_id",
+                "D_LEGACY_EMPTY|S9001|R_LEGACY_EMPTY|Legacy body|2|S9001,\n"),
+            "empty liked student IDs must remain invalid in legacy rows");
+
+    require(!DiaryPost::fromModernFields(
+                "D_DIRECT_BAD",
+                "R_DIRECT_BAD",
+                "Title",
+                "Body",
+                DiaryDisplayStatus::Displayed,
+                optional<string>("2026-10-07T12:34:56"),
+                2,
+                {"S9001"})
+                 .has_value(),
+            "modern construction must reject a likeCount/list mismatch");
+}
+
+void testDiaryServiceRequestModerationAndLikes()
+{
+    ScopedTemporaryDirectory temporaryDirectory("diary_service_lifecycle");
+    createSyntheticRuntimeData(temporaryDirectory.path());
+    DataManager data(temporaryDirectory.path());
+    require(data.loadAll(), "synthetic diary service data should load");
+    data.addStudent(Student("S9002", "Second Student", "unused", "Class B", "Major B"));
+    data.addRecord(makeRecord(
+        "R9002", "S9001", "C01", "2026/04/02", 1.0,
+        RecordStatus::Approved, 2.0));
+    data.addRecord(makeRecord(
+        "R9003", "S9002", "C02", "2026/04/03", 2.0,
+        RecordStatus::Approved, 3.0));
+
+    DiaryService service(data);
+    require(service.requestDisplay(
+                "S_MISSING", "R9002", "Title", "Content").status ==
+                DiaryServiceStatus::StudentNotFound,
+            "only an existing student may request display");
+    require(service.requestDisplay(
+                "S9002", "R9002", "Title", "Content").status ==
+                DiaryServiceStatus::RecordNotOwned,
+            "a student may not request display for another student's record");
+    require(service.requestDisplay(
+                "S9001", "R9001", "Title", "Content").status ==
+                DiaryServiceStatus::RecordNotApproved,
+            "a Pending source record cannot be used for a display request");
+    require(service.requestDisplay(
+                "S9001", "R9002", "  |bad", "Content").status ==
+                DiaryServiceStatus::InvalidTitle,
+            "title validation should reject the legacy delimiter after trimming");
+    require(service.requestDisplay(
+                "S9001", "R9002", "Title", "  \n ").status ==
+                DiaryServiceStatus::InvalidContent,
+            "content validation should reject blank text after trimming");
+
+    const DiaryServiceOutcome requested = service.requestDisplay(
+        "S9001", "R9002", "  Campus work  ", "  Helped at the campus event.  ");
+    require(requested.succeeded() && !requested.diaryId.empty(),
+            "an owned Approved record should create a pending display request");
+    DiaryPost *pending = data.findDiary(requested.diaryId);
+    require(pending != nullptr &&
+                pending->getDisplayStatus() ==
+                    DiaryDisplayStatus::PendingDisplayReview &&
+                pending->getTitle() == "Campus work" &&
+                pending->getContent() == "Helped at the campus event." &&
+                !pending->getPublishedAt().has_value(),
+            "new requests should trim title/content and have no publication time");
+    require(service.queryPublicFeed("S9002").empty(),
+            "a pending request must not appear in the public feed");
+    require(service.like("S9002", requested.diaryId).status ==
+                DiaryServiceStatus::InvalidState &&
+                service.unlike("S9002", requested.diaryId).status ==
+                    DiaryServiceStatus::InvalidState,
+            "pending requests must reject like and unlike");
+    require(service.requestDisplay(
+                "S9001", "R9002", "Second title", "Second content").status ==
+                DiaryServiceStatus::DuplicateRecord,
+            "a record may have at most one DiaryPost");
+    const vector<DiaryApplicationView> applications =
+        service.queryMyApplications("S9001");
+    const bool requestedApplicationFound = std::any_of(
+        applications.begin(), applications.end(),
+        [&requested](const DiaryApplicationView &application)
+        {
+            return application.diaryId == requested.diaryId;
+        });
+    require(requestedApplicationFound &&
+                service.queryModeration(
+                    DiaryDisplayStatus::PendingDisplayReview).size() == 1,
+            "student and moderation queries should expose the new pending request");
+    require(data.getOperationLogs().empty(),
+            "student display requests should not create OperationLog entries");
+
+    require(service.approveDisplay("A_MISSING", requested.diaryId).status ==
+                DiaryServiceStatus::AdministratorNotFound,
+            "approval requires an existing administrator");
+    require(service.approveDisplay("A9001", requested.diaryId).succeeded(),
+            "an administrator should approve a pending request");
+    const DiaryPost *displayed = data.findDiary(requested.diaryId);
+    require(displayed != nullptr &&
+                displayed->getDisplayStatus() == DiaryDisplayStatus::Displayed &&
+                displayed->getPublishedAt().has_value() &&
+                displayed->getPublishedAt()->size() == 19,
+            "approval should set Displayed and a real DateTime");
+    const vector<DiaryPostPublicView> feed = service.queryPublicFeed("S9002");
+    require(feed.size() == 1 && feed.front().diaryId == requested.diaryId &&
+                feed.front().title == "Campus work" &&
+                feed.front().content == "Helped at the campus event." &&
+                feed.front().authorAccountId == "S9001" &&
+                std::abs(feed.front().score - 2.0) < 1e-9,
+            "approved requests should be public using record ownership and final text");
+    require(data.getOperationLogs().size() == 1 &&
+                data.getOperationLogs().front().getOperationType() ==
+                    OperationType::DiaryDisplayApproved &&
+                data.getOperationLogs().front().getTargetType() ==
+                    OperationTargetType::DiaryPost &&
+                data.getOperationLogs().front().getTargetId() == requested.diaryId,
+            "successful approval should create exactly one DiaryPost audit log");
+    OperationLogService logService(data);
+    OperationLogQuery diaryTargetQuery;
+    diaryTargetQuery.targetType = OperationTargetType::DiaryPost;
+    diaryTargetQuery.targetId = requested.diaryId;
+    require(logService.query(diaryTargetQuery).size() == 1,
+            "OperationLog queries should filter DiaryPost targets explicitly");
+
+    require(service.like("S9002", requested.diaryId).succeeded(),
+            "a student should like a Displayed post");
+    require(service.like("S9002", requested.diaryId).status ==
+                DiaryServiceStatus::AlreadyLiked,
+            "duplicate likes should be rejected");
+    require(service.unlike("S9002", requested.diaryId).succeeded(),
+            "a student should remove an existing like");
+    require(service.unlike("S9002", requested.diaryId).status ==
+                DiaryServiceStatus::LikeNotFound,
+            "unlike should require an existing like");
+    require(data.getOperationLogs().size() == 1,
+            "like and unlike should not create admin audit logs");
+
+    require(service.like("S9002", requested.diaryId).succeeded(),
+            "the student should be able to like again after unlike");
+    const double scoreBeforeTakedown =
+        data.calculateStudentScore("S9001");
+    require(service.takeDown("A9001", requested.diaryId).succeeded(),
+            "an administrator should take down a Displayed post");
+    const DiaryPost *takenDown = data.findDiary(requested.diaryId);
+    require(takenDown != nullptr &&
+                takenDown->getDisplayStatus() == DiaryDisplayStatus::TakenDown &&
+                takenDown->getLikeCount() == 1 &&
+                takenDown->hasLiked("S9002") &&
+                takenDown->getPublishedAt().has_value(),
+            "takedown should preserve the published time and existing likes");
+    require(service.queryPublicFeed("S9002").empty() &&
+                service.like("S9002", requested.diaryId).status ==
+                    DiaryServiceStatus::InvalidState &&
+                service.unlike("S9002", requested.diaryId).status ==
+                    DiaryServiceStatus::InvalidState,
+            "TakenDown posts leave the feed and reject new like interactions");
+    requireNear(
+        data.calculateStudentScore("S9001"),
+        scoreBeforeTakedown,
+        "diary takedown must not change the source record score");
+
+    const DiaryServiceOutcome rejectedRequest = service.requestDisplay(
+        "S9002", "R9003", "Student effort", "Helped a classmate.");
+    require(rejectedRequest.succeeded(),
+            "another owned Approved record should allow a separate request");
+    require(service.rejectDisplay("A9001", rejectedRequest.diaryId).succeeded(),
+            "an administrator should reject a pending request");
+    require(data.findDiary(rejectedRequest.diaryId)->getDisplayStatus() ==
+                DiaryDisplayStatus::Rejected &&
+                service.queryPublicFeed("S9001").empty() &&
+                service.like("S9001", rejectedRequest.diaryId).status ==
+                    DiaryServiceStatus::InvalidState &&
+                service.unlike("S9001", rejectedRequest.diaryId).status ==
+                    DiaryServiceStatus::InvalidState,
+            "rejected requests should stay outside the public feed");
+    require(data.getOperationLogs().size() == 3,
+            "successful approve, takedown and reject should each create one log");
+    const vector<OperationLog> &logs = data.getOperationLogs();
+    require(std::count_if(
+                logs.begin(), logs.end(), [](const OperationLog &log)
+                {
+                    return log.getOperationType() ==
+                           OperationType::DiaryDisplayApproved;
+                }) == 1 &&
+                std::count_if(
+                    logs.begin(), logs.end(), [](const OperationLog &log)
+                    {
+                        return log.getOperationType() ==
+                               OperationType::DiaryDisplayRejected;
+                    }) == 1 &&
+                std::count_if(
+                    logs.begin(), logs.end(), [](const OperationLog &log)
+                    {
+                        return log.getOperationType() ==
+                               OperationType::DiaryTakenDown;
+                    }) == 1,
+            "approve, reject and takedown should each append one distinct event type");
+
+    DataManager reloaded(temporaryDirectory.path());
+    require(reloaded.loadDiaries() && reloaded.loadOperationLogs(),
+            "modern diary rows and new moderation logs should reload");
+    require(reloaded.findDiary(requested.diaryId)->getDisplayStatus() ==
+                DiaryDisplayStatus::TakenDown &&
+                reloaded.findDiary(rejectedRequest.diaryId)->getDisplayStatus() ==
+                    DiaryDisplayStatus::Rejected &&
+                reloaded.getOperationLogs().size() == 3,
+            "modern state transitions and moderation logs should round-trip");
+}
+
+void testDiaryServicePersistenceFailureSemantics()
+{
+    {
+        ScopedTemporaryDirectory temporaryDirectory(
+            "diary_single_file_prepare_failure");
+        createSyntheticRuntimeData(temporaryDirectory.path());
+        DataManager data(temporaryDirectory.path());
+        require(data.loadAll(), "single-file failure fixture should load");
+        data.addRecord(makeRecord(
+            "R9002", "S9001", "C01", "2026/04/02", 1.0,
+            RecordStatus::Approved, 2.0));
+        writeRuntimeFile(
+            temporaryDirectory.path(), "diaries.txt.tmp", "block");
+        DiaryService service(data);
+        const DiaryServiceOutcome result = service.requestDisplay(
+            "S9001", "R9002", "Title", "Content");
+        require(result.status == DiaryServiceStatus::PersistenceFailure &&
+                    data.findDiaryByRecordId("R9002") == nullptr,
+                "a failed single-diary save must not report success or retain the request");
+    }
+
+    {
+        ScopedTemporaryDirectory temporaryDirectory(
+            "diary_audit_prepare_failure");
+        createSyntheticRuntimeData(temporaryDirectory.path());
+        DataManager data(temporaryDirectory.path());
+        require(data.loadAll(), "audit prepare-failure fixture should load");
+        data.addRecord(makeRecord(
+            "R9002", "S9001", "C01", "2026/04/02", 1.0,
+            RecordStatus::Approved, 2.0));
+        DiaryService service(data);
+        const DiaryServiceOutcome requested = service.requestDisplay(
+            "S9001", "R9002", "Title", "Content");
+        require(requested.succeeded(), "audit fixture request should persist");
+        const string diaryFileBefore =
+            readFile(temporaryDirectory.path() / "diaries.txt");
+        writeRuntimeFile(
+            temporaryDirectory.path(), "operation_logs.csv.tmp", "block");
+        const DiaryServiceOutcome result =
+            service.approveDisplay("A9001", requested.diaryId);
+        require(result.status == DiaryServiceStatus::PersistenceFailure &&
+                    data.findDiary(requested.diaryId)->getDisplayStatus() ==
+                        DiaryDisplayStatus::PendingDisplayReview &&
+                    data.getOperationLogs().empty() &&
+                    readFile(temporaryDirectory.path() / "diaries.txt") ==
+                        diaryFileBefore,
+                "ordinary audit Prepare failure should restore in-memory and disk state");
+    }
+
+    {
+        ScopedTemporaryDirectory temporaryDirectory(
+            "diary_audit_partial_commit");
+        createSyntheticRuntimeData(temporaryDirectory.path());
+        DataManager data(temporaryDirectory.path());
+        require(data.loadAll(), "audit partial-commit fixture should load");
+        data.addRecord(makeRecord(
+            "R9002", "S9001", "C01", "2026/04/02", 1.0,
+            RecordStatus::Approved, 2.0));
+        DiaryService service(data);
+        const DiaryServiceOutcome requested = service.requestDisplay(
+            "S9001", "R9002", "Title", "Content");
+        require(requested.succeeded(), "partial-commit fixture request should persist");
+        writeRuntimeFile(
+            temporaryDirectory.path(), "operation_logs.csv.bak", "block");
+        const DiaryServiceOutcome result =
+            service.approveDisplay("A9001", requested.diaryId);
+        require(result.status ==
+                    DiaryServiceStatus::SeverePersistenceFailure,
+                "a log Commit failure after diary Commit must be severe and not success");
+        DataManager reloaded(temporaryDirectory.path());
+        require(reloaded.loadDiaries() && reloaded.loadOperationLogs() &&
+                    reloaded.findDiary(requested.diaryId)->getDisplayStatus() ==
+                        DiaryDisplayStatus::Displayed &&
+                    reloaded.getOperationLogs().empty(),
+                "partial commit should truthfully leave diary committed without claiming its log");
+    }
+}
+
+void testLegacyDiaryTakedownDoesNotInventHistory()
+{
+    ScopedTemporaryDirectory temporaryDirectory("legacy_diary_takedown");
+    createSyntheticRuntimeData(temporaryDirectory.path());
+    writeRuntimeFile(
+        temporaryDirectory.path(),
+        "records.txt",
+        "R9001|S9001|C01|2026/04/01|0.50|Campus|Witness|Source record|1|1.0\n");
+    writeRuntimeFile(
+        temporaryDirectory.path(),
+        "diaries.txt",
+        "D9001|S9001|R9001|Legacy body|1|S9001\n");
+
+    DataManager data(temporaryDirectory.path());
+    require(data.loadAll(), "legacy diary data should load");
+    const DiaryPost *legacy = data.findDiary("D9001");
+    require(legacy != nullptr && legacy->isLegacyCompatibilityRecord() &&
+                legacy->getDisplayStatus() == DiaryDisplayStatus::Displayed &&
+                legacy->getTitle().empty() &&
+                !legacy->getPublishedAt().has_value(),
+            "six-field legacy data should be Displayed without fabricated title/time");
+    DiaryService service(data);
+    const vector<DiaryPostPublicView> feed = service.queryPublicFeed("S9001");
+    require(feed.size() == 1 && feed.front().diaryId == "D9001" &&
+                feed.front().title.empty() &&
+                !feed.front().publishedAt.has_value(),
+            "legacy Displayed posts should remain publicly queryable with unknown time");
+    require(service.takeDown("A9001", "D9001").succeeded(),
+            "a legacy Displayed post should be administratively taken down");
+    const DiaryPost *takenDown = data.findDiary("D9001");
+    require(takenDown != nullptr &&
+                takenDown->getDisplayStatus() == DiaryDisplayStatus::TakenDown &&
+                !takenDown->getPublishedAt().has_value() &&
+                takenDown->getLikeCount() == 1 &&
+                takenDown->hasLiked("S9001"),
+            "legacy takedown should preserve likes and keep the historical time absent");
+
+    DataManager reloaded(temporaryDirectory.path());
+    require(reloaded.loadDiaries(),
+            "legacy takedown should persist in the modern eight-field row");
+    require(readFile(temporaryDirectory.path() / "diaries.txt") ==
+                "D9001|R9001||Legacy body|TakenDown||1|S9001\n",
+            "legacy-derived takedown should persist as eight fields without fabricated title or time");
+    const DiaryPost *reloadedPost = reloaded.findDiary("D9001");
+    require(reloadedPost != nullptr &&
+                reloadedPost->getDisplayStatus() == DiaryDisplayStatus::TakenDown &&
+                !reloadedPost->getPublishedAt().has_value() &&
+                reloadedPost->getLikeCount() == 1 &&
+                reloadedPost->hasLiked("S9001"),
+            "legacy compatibility should survive a restart without inventing history");
+}
+
+void testDiaryPublicFeedOrdersModernBeforeStableLegacyPosts()
+{
+    ScopedTemporaryDirectory temporaryDirectory("diary_public_order");
+    createSyntheticRuntimeData(temporaryDirectory.path());
+    writeRuntimeFile(
+        temporaryDirectory.path(),
+        "records.txt",
+        "R9001|S9001|C01|2026/04/01|0.50|Campus|Witness|Legacy source|1|1.0\n"
+        "R9002|S9001|C01|2026/04/02|0.50|Campus|Witness|New source|1|1.0\n"
+        "R9003|S9001|C01|2026/04/03|0.50|Campus|Witness|Old source|1|1.0\n");
+    writeRuntimeFile(
+        temporaryDirectory.path(),
+        "diaries.txt",
+        "D9001|S_WRONG|R9001|Legacy content|1|S9001\n"
+        "D9002|R9002|Newest title|Newest content|Displayed|2026-10-01T12:00:00|0|\n"
+        "D9003|R9003|Older title|Older content|Displayed|2026-09-01T12:00:00|0|\n");
+
+    DataManager data(temporaryDirectory.path());
+    require(data.loadAll(), "public ordering fixtures should load");
+    DiaryService service(data);
+    const vector<DiaryPostPublicView> feed = service.queryPublicFeed("S9001");
+    require(feed.size() == 3 &&
+                feed[0].diaryId == "D9002" &&
+                feed[1].diaryId == "D9003" &&
+                feed[2].diaryId == "D9001",
+            "modern posts should sort newest first and legacy posts should retain stable trailing order");
+    require(feed[2].authorAccountId == "S9001" &&
+                !feed[2].publishedAt.has_value(),
+            "legacy publisher and missing time must not override record ownership or invent chronology");
 }
 
 StudentVolunteerInput validStudentVolunteerInput()
@@ -1716,6 +2170,12 @@ int main()
         testDiaryPostLikes();
         testDiaryServicePublishesOnlyApprovedPostsWithRecordOwnerFacts();
         testDiaryServiceReturnsEmptyForIneligiblePosts();
+        testDiaryLoaderSupportsTheApprovedModernRowShape();
+        testDiaryLoaderEnforcesLikePersistenceInvariants();
+        testDiaryServiceRequestModerationAndLikes();
+        testDiaryServicePersistenceFailureSemantics();
+        testLegacyDiaryTakedownDoesNotInventHistory();
+        testDiaryPublicFeedOrdersModernBeforeStableLegacyPosts();
         testStudentVolunteerSubmitDurationAndCategoryRules();
         testStudentVolunteerModifyRejectsForeignApprovedAndInvalidChanges();
         testStudentVolunteerModifyResubmitsRejectedRecord();

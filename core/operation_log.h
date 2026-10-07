@@ -7,12 +7,16 @@
 enum class OperationType
 {
     VolunteerRecordApproved,
-    VolunteerRecordRejected
+    VolunteerRecordRejected,
+    DiaryDisplayApproved,
+    DiaryDisplayRejected,
+    DiaryTakenDown
 };
 
 enum class OperationTargetType
 {
-    VolunteerRecord
+    VolunteerRecord,
+    DiaryPost
 };
 
 std::string operationTypeToken(OperationType type);

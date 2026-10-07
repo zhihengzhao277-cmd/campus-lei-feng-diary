@@ -9,6 +9,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <system_error>
+#include <unordered_set>
 #include <utility>
 using namespace std;
 
@@ -162,6 +163,69 @@ string serializeRecords(const vector<VolunteerRecord> &records)
         contents << row.str() << '\n';
     }
     return contents.str();
+}
+
+string serializeDiaries(const DataList<DiaryPost> &diaries)
+{
+    ostringstream contents;
+    for (const DiaryPost &diary : diaries.getItems())
+    {
+        if (diary.usesLegacySixFieldFormat())
+        {
+            contents << diary.getDiaryId() << "|"
+                     << diary.getStudentId() << "|"
+                     << diary.getRecordId() << "|"
+                     << diary.getContent() << "|"
+                     << diary.getLikeCount() << "|";
+        }
+        else
+        {
+            contents << diary.getDiaryId() << "|"
+                     << diary.getRecordId() << "|"
+                     << diary.getTitle() << "|"
+                     << diary.getContent() << "|"
+                     << diaryDisplayStatusToken(diary.getDisplayStatus())
+                     << "|"
+                     << diary.getPublishedAt().value_or("") << "|"
+                     << diary.getLikeCount() << "|";
+        }
+
+        const vector<string> &likedStudentIds =
+            diary.getLikedStudentIds();
+        for (size_t index = 0; index < likedStudentIds.size(); ++index)
+        {
+            if (index > 0)
+            {
+                contents << ",";
+            }
+            contents << likedStudentIds[index];
+        }
+        contents << '\n';
+    }
+    return contents.str();
+}
+
+bool parseNonnegativeInt(const string &text, int &value)
+{
+    if (text.empty())
+    {
+        return false;
+    }
+    try
+    {
+        size_t parsedCharacters = 0;
+        const int parsed = stoi(text, &parsedCharacters);
+        if (parsedCharacters != text.size() || parsed < 0)
+        {
+            return false;
+        }
+        value = parsed;
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
 }
 
 bool parseFiniteDouble(const string &text, double &value)
@@ -451,45 +515,97 @@ bool DataManager::loadDiaries() /// AI大修
         return false;
     }
 
+    vector<DiaryPost> loadedDiaries;
+    unordered_set<string> diaryIds;
+    unordered_set<string> recordIds;
     string line;
-    diaryPosts.getItems().clear();
-
     while (getline(file, line))
     {
         vector<string> fields = split(line, '|');
-
-        if (fields.size() != 6)
+        if (fields.size() != 6 && fields.size() != 8)
         {
+            return false;
+        }
+
+        const bool legacyRow = fields.size() == 6;
+        const string diaryId = fields[0];
+        const string recordId = legacyRow ? fields[2] : fields[1];
+        const string likedStudentsText =
+            legacyRow ? fields[5] : fields[7];
+        int likeCount = 0;
+        if (diaryId.empty() || recordId.empty() ||
+            !parseNonnegativeInt(
+                legacyRow ? fields[4] : fields[6], likeCount) ||
+            !diaryIds.insert(diaryId).second ||
+            !recordIds.insert(recordId).second)
+        {
+            return false;
+        }
+
+        vector<string> likedStudentIds;
+        if (!likedStudentsText.empty())
+        {
+            likedStudentIds = split(likedStudentsText, ',');
+            for (const string &studentId : likedStudentIds)
+            {
+                if (studentId.empty())
+                {
+                    return false;
+                }
+            }
+        }
+        if (likedStudentIds.size() != static_cast<size_t>(likeCount))
+        {
+            return false;
+        }
+
+        if (legacyRow)
+        {
+            DiaryPost diary(
+                diaryId,
+                fields[1],
+                recordId,
+                fields[3],
+                likeCount);
+            for (const string &studentId : likedStudentIds)
+            {
+                if (!diary.addLikedStudentId(studentId))
+                {
+                    return false;
+                }
+            }
+            loadedDiaries.push_back(std::move(diary));
             continue;
         }
 
-        int likeCount = stoi(fields[4]);
-
-        DiaryPost diary(
-            fields[0],
-            fields[1],
+        DiaryDisplayStatus status;
+        if (!parseDiaryDisplayStatusToken(fields[4], status))
+        {
+            return false;
+        }
+        const optional<string> publishedAt = optionalField(fields[5]);
+        optional<DiaryPost> diary = DiaryPost::fromModernFields(
+            diaryId,
+            recordId,
             fields[2],
             fields[3],
-            likeCount);
-
-        string likedStudentsText = fields[5];
-
-        if (!likedStudentsText.empty())
+            status,
+            publishedAt,
+            likeCount,
+            likedStudentIds);
+        if (!diary.has_value())
         {
-            vector<string> likedStudentIds =
-                split(likedStudentsText, ',');
-
-            for (const string &studentId :
-                 likedStudentIds)
-            {
-                diary.addLikedStudentId(studentId);
-            }
+            return false;
         }
-
-        diaryPosts.add(diary);
+        loadedDiaries.push_back(std::move(*diary));
     }
 
-    return !file.bad();
+    if (file.bad())
+    {
+        return false;
+    }
+    diaryPosts.getItems().swap(loadedDiaries);
+    return true;
 }
 
 bool DataManager::loadOperationLogs()
@@ -626,37 +742,107 @@ DataManager::saveRecordsAndOperationLogs() const
     return {RecordLogPersistenceStatus::Success, ""};
 }
 
-void DataManager::saveDiaries() const /// AI大修
+DiaryPersistenceOutcome DataManager::saveDiaries() const
 {
-    ofstream file(dataRoot_ / "diaries.txt");
-
-    for (const DiaryPost &diary :
-         diaryPosts.getItems())
+    const filesystem::path formalPath = dataRoot_ / "diaries.txt";
+    const filesystem::path temporaryPath = dataRoot_ / "diaries.txt.tmp";
+    const filesystem::path backupPath = dataRoot_ / "diaries.txt.bak";
+    string errorMessage;
+    if (!writePreparedFile(
+            temporaryPath, serializeDiaries(diaryPosts), errorMessage))
     {
-        file
-            << diary.getDiaryId() << "|"
-            << diary.getStudentId() << "|"
-            << diary.getRecordId() << "|"
-            << diary.getMessage() << "|"
-            << diary.getLikeCount() << "|";
-
-        const vector<string> &likedStudentIds =
-            diary.getLikedStudentIds();
-
-        for (size_t i = 0;
-             i < likedStudentIds.size();
-             ++i)
-        {
-            file << likedStudentIds[i];
-
-            if (i + 1 < likedStudentIds.size())
-            {
-                file << ",";
-            }
-        }
-
-        file << '\n';
+        return {
+            DiaryPersistenceStatus::PrepareFailure,
+            "diaries.txt Prepare failed: " + errorMessage};
     }
+
+    const FileReplaceState commit =
+        replacePreparedFile(temporaryPath, formalPath, backupPath);
+    if (commit == FileReplaceState::FailedUnchanged)
+    {
+        removeTemporaryFile(temporaryPath);
+        return {
+            DiaryPersistenceStatus::CommitFailure,
+            "diaries.txt Commit failed before the formal file changed"};
+    }
+    if (commit == FileReplaceState::PartialFailure)
+    {
+        removeTemporaryFile(temporaryPath);
+        return {
+            DiaryPersistenceStatus::SeverePartialCommit,
+            "diaries.txt replacement failed and its backup could not be restored"};
+    }
+
+    removeTemporaryFile(backupPath);
+    return {DiaryPersistenceStatus::Success, ""};
+}
+
+DiaryPersistenceOutcome DataManager::saveDiariesAndOperationLogs() const
+{
+    const filesystem::path diariesPath = dataRoot_ / "diaries.txt";
+    const filesystem::path logsPath = dataRoot_ / "operation_logs.csv";
+    const filesystem::path diariesTemporaryPath =
+        dataRoot_ / "diaries.txt.tmp";
+    const filesystem::path logsTemporaryPath =
+        dataRoot_ / "operation_logs.csv.tmp";
+    const filesystem::path diariesBackupPath =
+        dataRoot_ / "diaries.txt.bak";
+    const filesystem::path logsBackupPath =
+        dataRoot_ / "operation_logs.csv.bak";
+
+    string errorMessage;
+    if (!writePreparedFile(
+            diariesTemporaryPath,
+            serializeDiaries(diaryPosts),
+            errorMessage))
+    {
+        return {
+            DiaryPersistenceStatus::PrepareFailure,
+            "diaries.txt Prepare failed: " + errorMessage};
+    }
+    if (!writePreparedFile(
+            logsTemporaryPath,
+            OperationLogCsvCodec::serialize(operationLogs),
+            errorMessage))
+    {
+        removeTemporaryFile(diariesTemporaryPath);
+        return {
+            DiaryPersistenceStatus::PrepareFailure,
+            "operation_logs.csv Prepare failed: " + errorMessage};
+    }
+
+    const FileReplaceState diariesCommit = replacePreparedFile(
+        diariesTemporaryPath, diariesPath, diariesBackupPath);
+    if (diariesCommit == FileReplaceState::FailedUnchanged)
+    {
+        removeTemporaryFile(diariesTemporaryPath);
+        removeTemporaryFile(logsTemporaryPath);
+        return {
+            DiaryPersistenceStatus::CommitFailure,
+            "diaries.txt Commit failed before a formal file changed"};
+    }
+    if (diariesCommit == FileReplaceState::PartialFailure)
+    {
+        removeTemporaryFile(diariesTemporaryPath);
+        removeTemporaryFile(logsTemporaryPath);
+        return {
+            DiaryPersistenceStatus::SeverePartialCommit,
+            "diaries.txt replacement failed and its backup could not be restored"};
+    }
+
+    const FileReplaceState logsCommit = replacePreparedFile(
+        logsTemporaryPath, logsPath, logsBackupPath);
+    if (logsCommit != FileReplaceState::Success)
+    {
+        removeTemporaryFile(logsTemporaryPath);
+        return {
+            DiaryPersistenceStatus::SeverePartialCommit,
+            "diaries.txt committed but operation_logs.csv Commit failed"};
+    }
+
+    removeTemporaryFile(diariesBackupPath);
+    removeTemporaryFile(logsBackupPath);
+    return {DiaryPersistenceStatus::Success, ""};
 }
 Student *DataManager::findStudent(const string &accountId)
 {

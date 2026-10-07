@@ -18,6 +18,7 @@ class QListWidget;
 class QStackedWidget;
 class QTableView;
 class QHBoxLayout;
+class QTextEdit;
 class OperationLogTableModel;
 enum class VolunteerReviewStatus;
 
@@ -45,6 +46,11 @@ private slots:
     void updateReviewPreview();
     void refreshOperationLogPage();
     void applyOperationLogFilter();
+    void refreshDiaryManagementPage();
+    void showSelectedDiaryDetail();
+    void approveSelectedDiary();
+    void rejectSelectedDiary();
+    void takeDownSelectedDiary();
     void refreshStatisticsPage();
     void createStudent();
     void createAdministrator();
@@ -130,10 +136,20 @@ private:
 
     QWidget *operationLogPage;
     QComboBox *operationLogTypeFilter;
+    QComboBox *operationLogTargetTypeFilter;
     QLineEdit *operationLogTargetIdEdit;
     QTableView *operationLogTable;
     QLabel *operationLogEmptyLabel;
     OperationLogTableModel *operationLogModel;
+
+    QWidget *diaryManagementPage;
+    QComboBox *diaryStatusFilter;
+    QTableWidget *diaryManagementTable;
+    QLabel *diaryManagementEmptyLabel;
+    QTextEdit *diaryManagementDetail;
+    QPushButton *diaryApproveButton;
+    QPushButton *diaryRejectButton;
+    QPushButton *diaryTakeDownButton;
 
     void buildInterface();
     void buildHomePage();
@@ -143,6 +159,8 @@ private:
     void buildCreateAdministratorPage();
     void buildProfilePage();
     void buildOperationLogPage();
+    void buildDiaryManagementPage();
+    std::string selectedDiaryId() const;
     QFrame *buildOperationLogFilterCard();
     QFrame *buildOperationLogTableCard();
     void addOperationLogTypeFilter(QHBoxLayout *layout);

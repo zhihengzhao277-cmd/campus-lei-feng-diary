@@ -24,6 +24,8 @@ public:
 
     static QString administratorOperationLogPage();
 
+    static QString administratorDiaryManagementPage();
+
     static QString administratorRemainingPages();
 
     static QString studentRecordsPage();

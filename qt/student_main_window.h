@@ -49,6 +49,7 @@ private slots:
     void refreshRankingPage();
     void refreshBadgePage();
     void refreshDiaryPublishOptions();
+    void refreshDiaryApplications();
     void refreshDiaryWall();
     void publishDiary();
     void refreshProfilePage();
@@ -123,7 +124,10 @@ private:
     QWidget *diaryWallPage;
 
     QComboBox *diaryRecordCombo;
+    QLineEdit *diaryTitleEdit;
     QTextEdit *diaryMessageEdit;
+    QTableWidget *diaryApplicationsTable;
+    QLabel *diaryApplicationsEmptyLabel;
 
     QScrollArea *diaryScrollArea;
     QWidget *diaryContainer;

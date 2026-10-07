@@ -1,5 +1,6 @@
 #include "data_manager.h"
 #include "student_volunteer_service.h"
+#include "diary_service.h"
 #include "volunteer_review_service.h"
 
 #include <cmath>
@@ -843,186 +844,141 @@ void deleteVolunteerRecord(
     }
 }
 
+string diaryServiceFailureMessage(DiaryServiceStatus status)
+{
+    switch (status)
+    {
+    case DiaryServiceStatus::StudentNotFound:
+        return "学生账号不存在。";
+    case DiaryServiceStatus::AdministratorNotFound:
+        return "管理员账号不存在。";
+    case DiaryServiceStatus::RecordNotFound:
+        return "志愿记录不存在。";
+    case DiaryServiceStatus::RecordNotOwned:
+        return "不能为其他学生的志愿记录提交日记。";
+    case DiaryServiceStatus::RecordNotApproved:
+        return "只有本人审核通过的志愿记录可以申请展示。";
+    case DiaryServiceStatus::DuplicateRecord:
+        return "该志愿记录已经提交过日记申请。";
+    case DiaryServiceStatus::DiaryNotFound:
+        return "日记不存在或尚未公开。";
+    case DiaryServiceStatus::InvalidTitle:
+        return "日记标题无效，且不能包含竖线或换行。";
+    case DiaryServiceStatus::InvalidContent:
+        return "日记内容无效，且不能包含竖线或换行。";
+    case DiaryServiceStatus::InvalidState:
+        return "该日记当前不可点赞。";
+    case DiaryServiceStatus::AlreadyLiked:
+        return "你已经点过赞了。";
+    case DiaryServiceStatus::LikeNotFound:
+        return "当前没有可取消的点赞。";
+    case DiaryServiceStatus::PersistenceFailure:
+        return "保存失败，数据已恢复到操作前状态。";
+    case DiaryServiceStatus::SeverePersistenceFailure:
+        return "数据保存发生严重错误，请停止写入并重启应用。";
+    case DiaryServiceStatus::Success:
+        return {};
+    }
+    return "日记操作失败。";
+}
+
 void publishDiary(Student &student, DataManager &data)
 {
-    cout << "\n===== 可发布到日记墙的志愿记录 =====\n";
+    DiaryService service(data);
+    const vector<DiaryApplicationView> applications =
+        service.queryMyApplications(student.getAccountId());
+
+    cout << "\n===== 可申请展示的志愿记录 =====\n";
     bool found = false;
-    for (const VolunteerRecord &item : data.getRecords())
+    for (const VolunteerRecord &record : data.getRecords())
     {
-        if (item.getStudentId() == student.getAccountId() && item.getStatus() == RecordStatus::Approved && data.findDiaryByRecordId(item.getRecordId()) == nullptr)
+        if (record.getStudentId() != student.getAccountId() ||
+            record.getStatus() != RecordStatus::Approved)
         {
-            const VolunteerCategory *category = data.findCategory(item.getCategoryId());
-            cout << item.getRecordId() << "  ";
-            if (category != nullptr)
-            {
-                cout << category->getName();
-            }
-            else
-            {
-                cout << item.getCategoryId();
-            }
-            cout << "  "
-                 << item.getDate()
-                 << "  Approved\n";
-            found = true;
+            continue;
         }
+        bool alreadyApplied = false;
+        for (const DiaryApplicationView &application : applications)
+        {
+            if (application.recordId == record.getRecordId())
+                alreadyApplied = true;
+        }
+        if (alreadyApplied)
+            continue;
+
+        const string categoryId = record.getFinalCategoryId().value_or(
+            record.getAppliedCategoryId());
+        const VolunteerCategory *category = data.findCategory(categoryId);
+        cout << record.getRecordId() << "  "
+             << (category != nullptr ? category->getName() : categoryId)
+             << "  " << record.getDate() << "  Approved\n";
+        found = true;
     }
     if (!found)
     {
-        cout << "当前没有可发布到日记墙的志愿记录。\n";
-        return;
-    }
-    string recordId = readText("请输入要发布到日记墙的志愿记录编号：");
-
-    VolunteerRecord *record = data.findRecord(recordId);
-    if (record == nullptr)
-    {
-        cout << "志愿记录不存在。\n";
-        return;
-    }
-    if (record->getStudentId() != student.getAccountId())
-    {
-        cout << "不能发布其他学生的志愿记录。\n";
-        return;
-    }
-    if (record->getStatus() != RecordStatus::Approved)
-    {
-        cout << "只有审核通过的志愿记录才能发布日记。\n";
-        return;
-    }
-    if (data.findDiaryByRecordId(recordId) != nullptr)
-    {
-        cout << "该志愿记录已经发布过日记。\n";
-        return;
-    }
-    string message = readText("请输入你的日记留言：");
-    if (message.empty())
-    {
-        cout << "日记留言不能为空。\n";
+        cout << "当前没有可申请展示的志愿记录。\n";
         return;
     }
 
-    DiaryPost diary(
-        data.generateDiaryId(),
-        student.getAccountId(),
-        recordId,
-        message);
-
-    data.addDiary(diary);
-    data.saveDiaries();
-
-    cout << "日记发布成功。\n";
+    const string recordId = readText("请输入志愿记录编号：");
+    const string title = readText("请输入日记标题：");
+    const string content = readText("请输入日记内容：");
+    const DiaryServiceOutcome outcome = service.requestDisplay(
+        student.getAccountId(), recordId, title, content);
+    if (!outcome.succeeded())
+    {
+        cout << diaryServiceFailureMessage(outcome.status) << '\n';
+        return;
+    }
+    cout << "日记展示申请已提交，等待管理员审核。\n";
 }
 
-void showDiaryWall(const DataManager &data)
+void showDiaryWall(DataManager &data, const string &studentId)
 {
-    const DataList<DiaryPost> &diaries = data.getDiaries();
-    if (diaries.empty())
+    DiaryService service(data);
+    const vector<DiaryPostPublicView> feed =
+        service.queryPublicFeed(studentId);
+    if (feed.empty())
     {
-        cout << "当前日记墙还没有内容。\n";
+        cout << "当前日记墙还没有已审核公开的内容。\n";
         return;
     }
+
     cout << "\n===== 校园雷锋日记墙 =====\n";
-    for (const DiaryPost &diary :
-         diaries.getItems())
+    for (const DiaryPostPublicView &diary : feed)
     {
-        const Student *student = nullptr;
-        for (const Student &item :
-             data.getStudents())
-        {
-            if (item.getAccountId() == diary.getStudentId())
-            {
-                student = &item;
-                break;
-            }
-        }
-        const VolunteerRecord *record = nullptr;
-        for (const VolunteerRecord &item :
-             data.getRecords())
-        {
-            if (
-                item.getRecordId() ==
-                diary.getRecordId())
-            {
-                record = &item;
-                break;
-            }
-        }
-
-        cout << "\n日记编号："
-             << diary.getDiaryId();
-
-        cout << "\n发布者：";
-
-        if (student != nullptr)
-        {
-            cout << student->getName();
-        }
-        else
-        {
-            cout << diary.getStudentId();
-        }
-
-        cout << "\n志愿记录编号："
-             << diary.getRecordId();
-
-        if (record != nullptr)
-        {
-            const VolunteerCategory *category =
-                data.findCategory(
-                    record->getCategoryId());
-
-            cout << "\n志愿类别：";
-
-            if (category != nullptr)
-            {
-                cout << category->getName();
-            }
-            else
-            {
-                cout << record->getCategoryId();
-            }
-
-            cout << "\n服务日期："
-                 << record->getDate();
-            cout << "\n服务时长："
-                 << record->getDuration()
-                 << " 小时";
-            cout << "\n服务地点："
-                 << record->getPlace();
-        }
-
-        cout << "\n留言："
-             << diary.getMessage();
-        cout << "\n点赞数："
-             << diary.getLikeCount();
-        cout
-            << "\n-----------------------------\n";
+        cout << "\n日记编号：" << diary.diaryId
+             << "\n发布者：" << diary.authorName
+             << "（" << diary.authorAccountId << "）";
+        if (!diary.title.empty())
+            cout << "\n标题：" << diary.title;
+        cout << "\n志愿类别：" << diary.categoryName
+             << "\n服务日期：" << diary.serviceDate
+             << "\n服务时长：" << fixed << setprecision(1)
+             << diary.durationHours << " 小时"
+             << "\n积分：" << diary.score
+             << "\n服务地点：" << diary.place;
+        cout.unsetf(ios::floatfield);
+        cout << setprecision(6);
+        if (diary.publishedAt.has_value())
+            cout << "\n展示时间：" << *diary.publishedAt;
+        cout << "\n日记内容：" << diary.content
+             << "\n点赞数：" << diary.likeCount
+             << "\n-----------------------------\n";
     }
 }
 
-void likeDiary(
-    Student &student,
-    DataManager &data)
+void likeDiary(Student &student, DataManager &data)
 {
-    string diaryId =
-        readText("请输入要点赞的日记编号：");
-
-    DiaryPost *diary =
-        data.findDiary(diaryId);
-
-    if (diary == nullptr)
+    const string diaryId = readText("请输入要点赞的日记编号：");
+    DiaryService service(data);
+    const DiaryServiceOutcome outcome =
+        service.like(student.getAccountId(), diaryId);
+    if (!outcome.succeeded())
     {
-        cout << "日记不存在。\n";
+        cout << diaryServiceFailureMessage(outcome.status) << '\n';
         return;
     }
-    if (!diary->addLike(student.getAccountId()))
-    {
-        cout << "你已经点过赞了。\n";
-        return;
-    }
-    data.saveDiaries();
-
     cout << "点赞成功。\n";
 }
 
@@ -1193,7 +1149,7 @@ void studentSession(
         }
         else if (choice == 6)
         {
-            showDiaryWall(data);
+            showDiaryWall(data, student.getAccountId());
         }
         else if (choice == 7)
         {

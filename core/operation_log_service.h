@@ -23,6 +23,7 @@ struct OperationLogView
 struct OperationLogQuery
 {
     std::optional<OperationType> operationType;
+    std::optional<OperationTargetType> targetType;
     std::optional<std::string> targetId;
 };
 

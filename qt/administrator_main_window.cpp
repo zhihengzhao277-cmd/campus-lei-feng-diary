@@ -30,12 +30,15 @@
 #include <QTableView>
 #include <QTableWidget>
 #include <QTableWidgetItem>
+#include <QTextEdit>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <utility>
 
 #include "administrator.h"
 #include "data_manager.h"
+#include "diary_service.h"
 #include "operation_log_service.h"
 #include "volunteer_record.h"
 #include "volunteer_review_service.h"
@@ -126,6 +129,7 @@ namespace
 
     OperationLogQuery operationLogQueryFrom(
         const QComboBox *typeFilter,
+        const QComboBox *targetTypeFilter,
         const QLineEdit *targetIdEdit)
     {
         OperationLogQuery query;
@@ -134,12 +138,87 @@ namespace
         {
             query.operationType = static_cast<OperationType>(selectedType);
         }
+        const int selectedTargetType =
+            targetTypeFilter->currentData().toInt();
+        if (selectedTargetType >= 0)
+        {
+            query.targetType =
+                static_cast<OperationTargetType>(selectedTargetType);
+        }
         const QString targetId = targetIdEdit->text().trimmed();
         if (!targetId.isEmpty())
         {
             query.targetId = targetId.toStdString();
         }
         return query;
+    }
+
+    QString diaryDisplayStatusText(DiaryDisplayStatus status)
+    {
+        switch (status)
+        {
+        case DiaryDisplayStatus::PendingDisplayReview:
+            return "待展示审核";
+        case DiaryDisplayStatus::Displayed:
+            return "已展示";
+        case DiaryDisplayStatus::Rejected:
+            return "审核未通过";
+        case DiaryDisplayStatus::TakenDown:
+            return "已下架";
+        }
+        return "未知状态";
+    }
+
+    QString diaryServiceFailureMessage(DiaryServiceStatus status)
+    {
+        switch (status)
+        {
+        case DiaryServiceStatus::StudentNotFound:
+            return "学生账号不存在，请刷新后重试。";
+        case DiaryServiceStatus::AdministratorNotFound:
+            return "当前管理员账号不存在，请重新登录。";
+        case DiaryServiceStatus::RecordNotFound:
+            return "关联志愿记录不存在。";
+        case DiaryServiceStatus::RecordNotOwned:
+            return "关联志愿记录与作者不匹配。";
+        case DiaryServiceStatus::RecordNotApproved:
+            return "关联志愿记录未通过审核，无法执行此操作。";
+        case DiaryServiceStatus::DuplicateRecord:
+            return "该志愿记录已有日记申请。";
+        case DiaryServiceStatus::DiaryNotFound:
+            return "所选日记不存在，请刷新后重试。";
+        case DiaryServiceStatus::InvalidTitle:
+            return "日记标题无效。";
+        case DiaryServiceStatus::InvalidContent:
+            return "日记内容无效。";
+        case DiaryServiceStatus::InvalidState:
+            return "该日记状态不允许此操作，请刷新后重试。";
+        case DiaryServiceStatus::AlreadyLiked:
+            return "当前学生已经点赞。";
+        case DiaryServiceStatus::LikeNotFound:
+            return "当前没有可取消的点赞。";
+        case DiaryServiceStatus::PersistenceFailure:
+            return "保存失败，系统已恢复到操作前状态。";
+        case DiaryServiceStatus::SeverePersistenceFailure:
+            return "数据保存发生严重错误。请停止写入并重启应用。";
+        case DiaryServiceStatus::Success:
+            return {};
+        }
+        return "日记操作失败，请刷新后重试。";
+    }
+
+    void showDiaryServiceFailure(
+        QWidget *parent,
+        DiaryServiceStatus status)
+    {
+        const QString message = diaryServiceFailureMessage(status);
+        if (status == DiaryServiceStatus::SeverePersistenceFailure)
+        {
+            QMessageBox::critical(parent, "数据保存严重错误", message);
+            QCoreApplication::exit(1);
+            return;
+        }
+        QMessageBox::warning(parent, "日记操作失败", message);
     }
 }
 
@@ -205,10 +284,19 @@ AdministratorMainWindow::AdministratorMainWindow(
       profileAccountLabel(nullptr),
       operationLogPage(nullptr),
       operationLogTypeFilter(nullptr),
+      operationLogTargetTypeFilter(nullptr),
       operationLogTargetIdEdit(nullptr),
       operationLogTable(nullptr),
       operationLogEmptyLabel(nullptr),
-      operationLogModel(nullptr)
+      operationLogModel(nullptr),
+      diaryManagementPage(nullptr),
+      diaryStatusFilter(nullptr),
+      diaryManagementTable(nullptr),
+      diaryManagementEmptyLabel(nullptr),
+      diaryManagementDetail(nullptr),
+      diaryApproveButton(nullptr),
+      diaryRejectButton(nullptr),
+      diaryTakeDownButton(nullptr)
 {
     setWindowTitle(
         "校园雷锋日记 - 管理员端");
@@ -361,6 +449,9 @@ void AdministratorMainWindow::buildInterface()
     navigationList->addItem(
         "操作日志");
 
+    navigationList->addItem(
+        "日记管理");
+
     navigationList->setStyleSheet(
         StyleHelper::navigation());
 
@@ -374,6 +465,7 @@ void AdministratorMainWindow::buildInterface()
     buildCreateAdministratorPage();
     buildProfilePage();
     buildOperationLogPage();
+    buildDiaryManagementPage();
 
     contentStack->addWidget(
         homePage);
@@ -395,6 +487,9 @@ void AdministratorMainWindow::buildInterface()
 
     contentStack->addWidget(
         operationLogPage);
+
+    contentStack->addWidget(
+        diaryManagementPage);
 
     bodyLayout->addWidget(
         navigationList);
@@ -662,6 +757,13 @@ void AdministratorMainWindow::
     {
         refreshOperationLogPage();
         contentStack->setCurrentWidget(operationLogPage);
+        return;
+    }
+
+    if (row == 7)
+    {
+        refreshDiaryManagementPage();
+        contentStack->setCurrentWidget(diaryManagementPage);
     }
 }
 
@@ -1618,6 +1720,15 @@ void AdministratorMainWindow::addOperationLogTypeFilter(
     operationLogTypeFilter->addItem(
         "审核驳回",
         static_cast<int>(OperationType::VolunteerRecordRejected));
+    operationLogTypeFilter->addItem(
+        "日记展示审核通过",
+        static_cast<int>(OperationType::DiaryDisplayApproved));
+    operationLogTypeFilter->addItem(
+        "日记展示审核未通过",
+        static_cast<int>(OperationType::DiaryDisplayRejected));
+    operationLogTypeFilter->addItem(
+        "日记下架",
+        static_cast<int>(OperationType::DiaryTakenDown));
     operationLogTypeFilter->setMinimumWidth(150);
     layout->addWidget(label);
     layout->addWidget(operationLogTypeFilter);
@@ -1626,6 +1737,19 @@ void AdministratorMainWindow::addOperationLogTypeFilter(
 void AdministratorMainWindow::addOperationLogTargetFilter(
     QHBoxLayout *layout)
 {
+    QLabel *typeLabel = new QLabel("目标类型");
+    typeLabel->setObjectName("adminOperationLogFieldLabel");
+    operationLogTargetTypeFilter = new QComboBox;
+    operationLogTargetTypeFilter->setObjectName(
+        "adminOperationLogTargetTypeFilter");
+    operationLogTargetTypeFilter->addItem("全部目标类型", -1);
+    operationLogTargetTypeFilter->addItem(
+        "志愿记录",
+        static_cast<int>(OperationTargetType::VolunteerRecord));
+    operationLogTargetTypeFilter->addItem(
+        "日记",
+        static_cast<int>(OperationTargetType::DiaryPost));
+
     QLabel *label = new QLabel("目标编号");
     label->setObjectName("adminOperationLogFieldLabel");
     operationLogTargetIdEdit = new QLineEdit;
@@ -1633,6 +1757,8 @@ void AdministratorMainWindow::addOperationLogTargetFilter(
         "adminOperationLogTargetFilter");
     operationLogTargetIdEdit->setPlaceholderText("输入志愿记录编号");
     operationLogTargetIdEdit->setMinimumWidth(190);
+    layout->addWidget(typeLabel);
+    layout->addWidget(operationLogTargetTypeFilter);
     layout->addWidget(label);
     layout->addWidget(operationLogTargetIdEdit, 1);
 }
@@ -1652,6 +1778,20 @@ void AdministratorMainWindow::connectOperationLogFilters(
         this,
         &AdministratorMainWindow::applyOperationLogFilter);
     connect(
+        operationLogTargetTypeFilter,
+        QOverload<int>::of(&QComboBox::currentIndexChanged),
+        this,
+        [this](int index)
+        {
+            const QString placeholder = index == 2
+                ? QStringLiteral("输入日记编号")
+                : (index == 1
+                       ? QStringLiteral("输入志愿记录编号")
+                       : QStringLiteral("输入编号（默认按志愿记录筛选）"));
+            operationLogTargetIdEdit->setPlaceholderText(placeholder);
+            applyOperationLogFilter();
+        });
+    connect(
         refreshButton,
         &QPushButton::clicked,
         this,
@@ -1663,6 +1803,7 @@ void AdministratorMainWindow::connectOperationLogFilters(
         [this]()
         {
             operationLogTypeFilter->setCurrentIndex(0);
+            operationLogTargetTypeFilter->setCurrentIndex(0);
             operationLogTargetIdEdit->clear();
             refreshOperationLogPage();
         });
@@ -1731,9 +1872,427 @@ void AdministratorMainWindow::refreshOperationLogPage()
     std::vector<OperationLogView> results = service.query(
         operationLogQueryFrom(
             operationLogTypeFilter,
+            operationLogTargetTypeFilter,
             operationLogTargetIdEdit));
     operationLogEmptyLabel->setVisible(results.empty());
     operationLogModel->setResults(std::move(results));
+}
+
+void AdministratorMainWindow::buildDiaryManagementPage()
+{
+    diaryManagementPage = new QWidget;
+    diaryManagementPage->setObjectName(
+        "administratorDiaryManagementPage");
+    diaryManagementPage->setStyleSheet(
+        StyleHelper::administratorDiaryManagementPage());
+
+    QVBoxLayout *mainLayout = new QVBoxLayout(diaryManagementPage);
+    mainLayout->setContentsMargins(22, 20, 22, 22);
+    mainLayout->setSpacing(14);
+
+    QLabel *titleLabel = new QLabel("日记管理");
+    titleLabel->setObjectName("adminDiaryPageTitle");
+    QLabel *subtitleLabel = new QLabel(
+        "审核学生提交的展示申请，并管理当前公开的校园日记。");
+    subtitleLabel->setObjectName("adminDiaryPageSubtitle");
+    mainLayout->addWidget(titleLabel);
+    mainLayout->addWidget(subtitleLabel);
+
+    QFrame *filterCard = new QFrame;
+    filterCard->setObjectName("adminDiaryFilterCard");
+    QHBoxLayout *filterLayout = new QHBoxLayout(filterCard);
+    filterLayout->setContentsMargins(16, 12, 16, 12);
+    filterLayout->setSpacing(10);
+    QLabel *filterLabel = new QLabel("展示状态");
+    filterLabel->setObjectName("adminDiaryFieldLabel");
+    diaryStatusFilter = new QComboBox;
+    diaryStatusFilter->setObjectName("adminDiaryStatusFilter");
+    diaryStatusFilter->addItem("全部", -1);
+    diaryStatusFilter->addItem(
+        "待展示审核",
+        static_cast<int>(DiaryDisplayStatus::PendingDisplayReview));
+    diaryStatusFilter->addItem(
+        "已展示",
+        static_cast<int>(DiaryDisplayStatus::Displayed));
+    diaryStatusFilter->addItem(
+        "审核未通过",
+        static_cast<int>(DiaryDisplayStatus::Rejected));
+    diaryStatusFilter->addItem(
+        "已下架",
+        static_cast<int>(DiaryDisplayStatus::TakenDown));
+    diaryStatusFilter->setMinimumWidth(180);
+
+    QPushButton *refreshButton = new QPushButton("刷新日记");
+    refreshButton->setObjectName("adminDiaryRefreshButton");
+    refreshButton->setCursor(Qt::PointingHandCursor);
+    filterLayout->addWidget(filterLabel);
+    filterLayout->addWidget(diaryStatusFilter);
+    filterLayout->addStretch();
+    filterLayout->addWidget(refreshButton);
+    mainLayout->addWidget(filterCard);
+
+    QHBoxLayout *contentLayout = new QHBoxLayout;
+    contentLayout->setSpacing(14);
+
+    QFrame *tableCard = new QFrame;
+    tableCard->setObjectName("adminDiaryTableCard");
+    QVBoxLayout *tableCardLayout = new QVBoxLayout(tableCard);
+    tableCardLayout->setContentsMargins(14, 12, 14, 14);
+    tableCardLayout->setSpacing(8);
+    QLabel *tableTitle = new QLabel("日记列表");
+    tableTitle->setObjectName("adminDiarySectionTitle");
+    tableCardLayout->addWidget(tableTitle);
+
+    diaryManagementTable = new QTableWidget;
+    diaryManagementTable->setObjectName("adminDiaryTable");
+    diaryManagementTable->setColumnCount(5);
+    diaryManagementTable->setHorizontalHeaderLabels(
+        {"日记编号", "学生", "标题", "志愿记录", "状态"});
+    diaryManagementTable->setEditTriggers(
+        QAbstractItemView::NoEditTriggers);
+    diaryManagementTable->setSelectionBehavior(
+        QAbstractItemView::SelectRows);
+    diaryManagementTable->setSelectionMode(
+        QAbstractItemView::SingleSelection);
+    diaryManagementTable->setAlternatingRowColors(true);
+    diaryManagementTable->setShowGrid(false);
+    diaryManagementTable->verticalHeader()->setVisible(false);
+    diaryManagementTable->verticalHeader()->setDefaultSectionSize(40);
+    diaryManagementTable->horizontalHeader()->setSectionResizeMode(
+        QHeaderView::ResizeToContents);
+    diaryManagementTable->horizontalHeader()->setSectionResizeMode(
+        2, QHeaderView::Stretch);
+    tableCardLayout->addWidget(diaryManagementTable, 1);
+    diaryManagementEmptyLabel = new QLabel("当前筛选条件下没有日记。");
+    diaryManagementEmptyLabel->setObjectName("adminDiaryEmptyState");
+    diaryManagementEmptyLabel->setAlignment(Qt::AlignCenter);
+    tableCardLayout->addWidget(diaryManagementEmptyLabel);
+
+    QFrame *detailCard = new QFrame;
+    detailCard->setObjectName("adminDiaryDetailCard");
+    QVBoxLayout *detailLayout = new QVBoxLayout(detailCard);
+    detailLayout->setContentsMargins(16, 12, 16, 14);
+    detailLayout->setSpacing(9);
+    QLabel *detailTitle = new QLabel("日记详情");
+    detailTitle->setObjectName("adminDiarySectionTitle");
+    detailLayout->addWidget(detailTitle);
+
+    diaryManagementDetail = new QTextEdit;
+    diaryManagementDetail->setObjectName("adminDiaryDetailText");
+    diaryManagementDetail->setReadOnly(true);
+    diaryManagementDetail->setPlaceholderText("选择一篇日记查看完整信息。");
+    detailLayout->addWidget(diaryManagementDetail, 1);
+
+    QHBoxLayout *actionLayout = new QHBoxLayout;
+    actionLayout->setSpacing(8);
+    diaryApproveButton = new QPushButton("审核通过");
+    diaryApproveButton->setObjectName("adminDiaryApproveButton");
+    diaryRejectButton = new QPushButton("审核未通过");
+    diaryRejectButton->setObjectName("adminDiaryRejectButton");
+    diaryTakeDownButton = new QPushButton("下架日记");
+    diaryTakeDownButton->setObjectName("adminDiaryTakeDownButton");
+    for (QPushButton *button : {
+             diaryApproveButton,
+             diaryRejectButton,
+             diaryTakeDownButton})
+    {
+        button->setCursor(Qt::PointingHandCursor);
+        button->setMinimumHeight(38);
+        button->setVisible(false);
+        actionLayout->addWidget(button);
+    }
+    detailLayout->addLayout(actionLayout);
+
+    contentLayout->addWidget(tableCard, 3);
+    contentLayout->addWidget(detailCard, 2);
+    mainLayout->addLayout(contentLayout, 1);
+
+    connect(
+        diaryStatusFilter,
+        QOverload<int>::of(&QComboBox::currentIndexChanged),
+        this,
+        &AdministratorMainWindow::refreshDiaryManagementPage);
+    connect(
+        refreshButton,
+        &QPushButton::clicked,
+        this,
+        &AdministratorMainWindow::refreshDiaryManagementPage);
+    connect(
+        diaryManagementTable,
+        &QTableWidget::itemSelectionChanged,
+        this,
+        &AdministratorMainWindow::showSelectedDiaryDetail);
+    connect(
+        diaryApproveButton,
+        &QPushButton::clicked,
+        this,
+        &AdministratorMainWindow::approveSelectedDiary);
+    connect(
+        diaryRejectButton,
+        &QPushButton::clicked,
+        this,
+        &AdministratorMainWindow::rejectSelectedDiary);
+    connect(
+        diaryTakeDownButton,
+        &QPushButton::clicked,
+        this,
+        &AdministratorMainWindow::takeDownSelectedDiary);
+
+    refreshDiaryManagementPage();
+}
+
+std::string AdministratorMainWindow::selectedDiaryId() const
+{
+    if (diaryManagementTable == nullptr)
+    {
+        return {};
+    }
+    const int row = diaryManagementTable->currentRow();
+    QTableWidgetItem *identityItem =
+        row >= 0 ? diaryManagementTable->item(row, 0) : nullptr;
+    if (identityItem == nullptr)
+    {
+        return {};
+    }
+    return identityItem->data(Qt::UserRole).toString().toStdString();
+}
+
+void AdministratorMainWindow::refreshDiaryManagementPage()
+{
+    if (dataManager == nullptr || diaryManagementTable == nullptr ||
+        diaryStatusFilter == nullptr)
+    {
+        return;
+    }
+
+    std::optional<DiaryDisplayStatus> status;
+    const int selectedStatus = diaryStatusFilter->currentData().toInt();
+    if (selectedStatus >= 0)
+    {
+        status = static_cast<DiaryDisplayStatus>(selectedStatus);
+    }
+    DiaryService service(*dataManager);
+    const std::vector<DiaryModerationView> diaries =
+        service.queryModeration(status);
+
+    diaryManagementTable->setRowCount(
+        static_cast<int>(diaries.size()));
+    diaryManagementEmptyLabel->setVisible(diaries.empty());
+    diaryManagementTable->setVisible(!diaries.empty());
+
+    for (int row = 0; row < static_cast<int>(diaries.size()); ++row)
+    {
+        const DiaryModerationView &diary =
+            diaries[static_cast<size_t>(row)];
+        const QString title = diary.title.empty()
+            ? QStringLiteral("历史日记（无标题）")
+            : QString::fromStdString(diary.title);
+        const QString student =
+            QString::fromStdString(diary.studentName) +
+            "（" + QString::fromStdString(diary.studentAccountId) + "）";
+        const QStringList values = {
+            QString::fromStdString(diary.diaryId),
+            student,
+            title,
+            QString::fromStdString(diary.recordId),
+            diaryDisplayStatusText(diary.displayStatus)};
+        for (int column = 0; column < values.size(); ++column)
+        {
+            QTableWidgetItem *item = new QTableWidgetItem(values[column]);
+            if (column == 0)
+            {
+                item->setData(
+                    Qt::UserRole,
+                    QString::fromStdString(diary.diaryId));
+            }
+            diaryManagementTable->setItem(row, column, item);
+        }
+    }
+
+    if (diaries.empty())
+    {
+        diaryManagementDetail->clear();
+        diaryApproveButton->setVisible(false);
+        diaryRejectButton->setVisible(false);
+        diaryTakeDownButton->setVisible(false);
+        return;
+    }
+    diaryManagementTable->setCurrentCell(0, 0);
+    showSelectedDiaryDetail();
+}
+
+void AdministratorMainWindow::showSelectedDiaryDetail()
+{
+    if (dataManager == nullptr || diaryManagementDetail == nullptr)
+    {
+        return;
+    }
+    const std::string diaryId = selectedDiaryId();
+    if (diaryId.empty())
+    {
+        diaryManagementDetail->clear();
+        diaryApproveButton->setVisible(false);
+        diaryRejectButton->setVisible(false);
+        diaryTakeDownButton->setVisible(false);
+        return;
+    }
+
+    DiaryService service(*dataManager);
+    const std::vector<DiaryModerationView> diaries =
+        service.queryModeration();
+    const auto selected = std::find_if(
+        diaries.begin(), diaries.end(),
+        [&diaryId](const DiaryModerationView &diary)
+        {
+            return diary.diaryId == diaryId;
+        });
+    if (selected == diaries.end())
+    {
+        diaryManagementDetail->setPlainText("所选日记已不存在，请刷新列表。");
+        diaryApproveButton->setVisible(false);
+        diaryRejectButton->setVisible(false);
+        diaryTakeDownButton->setVisible(false);
+        return;
+    }
+
+    const DiaryModerationView &diary = *selected;
+    const QString title = diary.title.empty()
+        ? QStringLiteral("历史日记（无标题）")
+        : QString::fromStdString(diary.title);
+    const QString publishedAt = diary.publishedAt.has_value()
+        ? QString::fromStdString(*diary.publishedAt)
+        : (diary.displayStatus == DiaryDisplayStatus::Displayed ||
+                   diary.displayStatus == DiaryDisplayStatus::TakenDown
+               ? QStringLiteral("历史发布时间未保存")
+               : QStringLiteral("尚未展示"));
+    QStringList lines = {
+        "学生：" + QString::fromStdString(diary.studentName) +
+            "（" + QString::fromStdString(diary.studentAccountId) + "）",
+        "日记编号：" + QString::fromStdString(diary.diaryId),
+        "志愿记录编号：" + QString::fromStdString(diary.recordId),
+        "标题：" + title,
+        "日记内容：" + QString::fromStdString(diary.content),
+        "最终类别：" + QString::fromStdString(diary.categoryName),
+        "服务日期：" + QString::fromStdString(diary.serviceDate),
+        "最终时长：" + QString::number(diary.durationHours, 'f', 1) + " 小时",
+        "最终积分：" + QString::number(diary.score, 'f', 1),
+        "服务地点：" + QString::fromStdString(diary.place),
+        "展示状态：" + diaryDisplayStatusText(diary.displayStatus),
+        "展示时间：" + publishedAt};
+    diaryManagementDetail->setPlainText(lines.join("\n"));
+
+    const bool pending = diary.displayStatus ==
+        DiaryDisplayStatus::PendingDisplayReview;
+    const bool displayed = diary.displayStatus ==
+        DiaryDisplayStatus::Displayed;
+    diaryApproveButton->setVisible(pending);
+    diaryRejectButton->setVisible(pending);
+    diaryTakeDownButton->setVisible(displayed);
+}
+
+void AdministratorMainWindow::approveSelectedDiary()
+{
+    if (dataManager == nullptr)
+    {
+        return;
+    }
+    const std::string diaryId = selectedDiaryId();
+    if (diaryId.empty())
+    {
+        return;
+    }
+    if (QMessageBox::question(
+            this,
+            "确认展示",
+            "审核通过后，该日记将展示在校园日记墙。确定继续吗？",
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No) != QMessageBox::Yes)
+    {
+        return;
+    }
+
+    DiaryService service(*dataManager);
+    const DiaryServiceOutcome outcome =
+        service.approveDisplay(accountId, diaryId);
+    if (!outcome.succeeded())
+    {
+        showDiaryServiceFailure(this, outcome.status);
+        refreshDiaryManagementPage();
+        return;
+    }
+    refreshDiaryManagementPage();
+    refreshOperationLogPage();
+    QMessageBox::information(this, "审核完成", "日记展示申请已通过。");
+}
+
+void AdministratorMainWindow::rejectSelectedDiary()
+{
+    if (dataManager == nullptr)
+    {
+        return;
+    }
+    const std::string diaryId = selectedDiaryId();
+    if (diaryId.empty())
+    {
+        return;
+    }
+    if (QMessageBox::question(
+            this,
+            "确认审核未通过",
+            "确定将这篇日记标记为审核未通过吗？",
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No) != QMessageBox::Yes)
+    {
+        return;
+    }
+
+    DiaryService service(*dataManager);
+    const DiaryServiceOutcome outcome =
+        service.rejectDisplay(accountId, diaryId);
+    if (!outcome.succeeded())
+    {
+        showDiaryServiceFailure(this, outcome.status);
+        refreshDiaryManagementPage();
+        return;
+    }
+    refreshDiaryManagementPage();
+    refreshOperationLogPage();
+    QMessageBox::information(this, "审核完成", "日记已标记为审核未通过。");
+}
+
+void AdministratorMainWindow::takeDownSelectedDiary()
+{
+    if (dataManager == nullptr)
+    {
+        return;
+    }
+    const std::string diaryId = selectedDiaryId();
+    if (diaryId.empty())
+    {
+        return;
+    }
+    if (QMessageBox::question(
+            this,
+            "确认下架",
+            "下架后，这篇日记将不再出现在日记墙。确定继续吗？",
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No) != QMessageBox::Yes)
+    {
+        return;
+    }
+
+    DiaryService service(*dataManager);
+    const DiaryServiceOutcome outcome =
+        service.takeDown(accountId, diaryId);
+    if (!outcome.succeeded())
+    {
+        showDiaryServiceFailure(this, outcome.status);
+        refreshDiaryManagementPage();
+        return;
+    }
+    refreshDiaryManagementPage();
+    refreshOperationLogPage();
+    QMessageBox::information(this, "日记已下架", "该日记已从日记墙下架。");
 }
 
 void AdministratorMainWindow::buildStatisticsPage()

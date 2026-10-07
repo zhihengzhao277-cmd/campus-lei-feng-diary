@@ -29,9 +29,17 @@ bool matchesQuery(
     {
         return false;
     }
+    const std::optional<OperationTargetType> targetType =
+        query.targetId.has_value() && !query.targetType.has_value()
+            ? std::optional<OperationTargetType>(
+                  OperationTargetType::VolunteerRecord)
+            : query.targetType;
+    if (targetType.has_value() && log.getTargetType() != *targetType)
+    {
+        return false;
+    }
     return !query.targetId.has_value() ||
-           (log.getTargetType() == OperationTargetType::VolunteerRecord &&
-            log.getTargetId() == *query.targetId);
+           log.getTargetId() == *query.targetId;
 }
 
 void sortNewestFirst(vector<OperationLogView> &results)

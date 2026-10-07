@@ -13,6 +13,7 @@
 #include <QBrush>
 #include <QColor>
 #include <QAbstractItemView>
+#include <QCoreApplication>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -79,6 +80,76 @@ namespace
         return text.contains('|') ||
                text.contains('\n') ||
                text.contains('\r');
+    }
+
+    QString diaryServiceFailureMessage(
+        DiaryServiceStatus status)
+    {
+        switch (status)
+        {
+        case DiaryServiceStatus::StudentNotFound:
+            return "当前学生账号不存在，请重新登录。";
+        case DiaryServiceStatus::AdministratorNotFound:
+            return "管理员账号不存在，请刷新后重试。";
+        case DiaryServiceStatus::RecordNotFound:
+            return "所选志愿记录不存在，请刷新后重试。";
+        case DiaryServiceStatus::RecordNotOwned:
+            return "不能为其他学生的志愿记录提交日记。";
+        case DiaryServiceStatus::RecordNotApproved:
+            return "只有本人已审核通过的志愿记录可以申请展示。";
+        case DiaryServiceStatus::DuplicateRecord:
+            return "这条志愿记录已经提交过日记申请。";
+        case DiaryServiceStatus::DiaryNotFound:
+            return "这篇日记已不存在，请刷新后重试。";
+        case DiaryServiceStatus::InvalidTitle:
+            return "请输入有效标题，且不能包含竖线或换行。";
+        case DiaryServiceStatus::InvalidContent:
+            return "请输入有效内容，且不能包含竖线或换行。";
+        case DiaryServiceStatus::InvalidState:
+            return "当前日记状态不允许此操作，请刷新后重试。";
+        case DiaryServiceStatus::AlreadyLiked:
+            return "你已经点赞过这篇日记。";
+        case DiaryServiceStatus::LikeNotFound:
+            return "当前没有可取消的点赞。";
+        case DiaryServiceStatus::PersistenceFailure:
+            return "保存失败，系统已恢复到操作前状态，请刷新后重试。";
+        case DiaryServiceStatus::SeverePersistenceFailure:
+            return "数据保存发生严重错误。请停止写入并重启应用。";
+        case DiaryServiceStatus::Success:
+            return {};
+        }
+        return "日记操作失败，请刷新后重试。";
+    }
+
+    bool showDiaryServiceFailure(
+        QWidget *parent,
+        DiaryServiceStatus status)
+    {
+        const QString message = diaryServiceFailureMessage(status);
+        if (status == DiaryServiceStatus::SeverePersistenceFailure)
+        {
+            QMessageBox::critical(parent, "数据保存严重错误", message);
+            QCoreApplication::exit(1);
+            return true;
+        }
+        QMessageBox::warning(parent, "日记操作失败", message);
+        return false;
+    }
+
+    QString diaryDisplayStatusText(DiaryDisplayStatus status)
+    {
+        switch (status)
+        {
+        case DiaryDisplayStatus::PendingDisplayReview:
+            return "待展示审核";
+        case DiaryDisplayStatus::Displayed:
+            return "已展示";
+        case DiaryDisplayStatus::Rejected:
+            return "展示审核未通过";
+        case DiaryDisplayStatus::TakenDown:
+            return "已下架";
+        }
+        return "未知状态";
     }
 
     enum class StudentVolunteerOperation
@@ -736,7 +807,10 @@ StudentMainWindow::StudentMainWindow(
       diaryPage(nullptr),
       diaryWallPage(nullptr),
       diaryRecordCombo(nullptr),
+      diaryTitleEdit(nullptr),
       diaryMessageEdit(nullptr),
+      diaryApplicationsTable(nullptr),
+      diaryApplicationsEmptyLabel(nullptr),
       diaryScrollArea(nullptr),
       diaryContainer(nullptr),
       diaryFeedLayout(nullptr),
@@ -1929,22 +2003,35 @@ void StudentMainWindow::buildDiaryPage()
 
     QVBoxLayout *mainLayout =
         new QVBoxLayout(diaryPage);
-    mainLayout->setContentsMargins(28, 24, 28, 24);
-    mainLayout->setSpacing(16);
+    mainLayout->setContentsMargins(28, 20, 28, 18);
+    mainLayout->setSpacing(10);
 
     QLabel *titleLabel =
-        new QLabel("发布志愿日记");
+        new QLabel("日记展示申请");
     titleLabel->setObjectName("studentDiaryPageTitle");
 
     mainLayout->addWidget(titleLabel);
 
     QLabel *tipLabel =
         new QLabel(
-            "分享你的志愿服务经历，"
-            "记录每一次有意义的行动。");
+            "提交已通过志愿记录的日记展示申请；审核通过后才会出现在日记墙。");
     tipLabel->setObjectName("studentDiaryPageSubtitle");
 
     mainLayout->addWidget(tipLabel);
+
+    QScrollArea *applicationScroll = new QScrollArea;
+    applicationScroll->setObjectName(
+        "studentDiaryApplicationScrollArea");
+    applicationScroll->setWidgetResizable(true);
+    applicationScroll->setFrameShape(QFrame::NoFrame);
+
+    QWidget *applicationContent = new QWidget;
+    applicationContent->setObjectName(
+        "studentDiaryApplicationContent");
+    QVBoxLayout *applicationLayout =
+        new QVBoxLayout(applicationContent);
+    applicationLayout->setContentsMargins(0, 2, 0, 8);
+    applicationLayout->setSpacing(14);
 
     QFrame *publishFrame =
         new QFrame;
@@ -1957,7 +2044,7 @@ void StudentMainWindow::buildDiaryPage()
     publishLayout->setSpacing(14);
 
     QLabel *publishTitle =
-        new QLabel("分享我的志愿日记");
+        new QLabel("提交日记展示申请");
     publishTitle->setObjectName("studentDiaryCardTitle");
 
     QLabel *recordTip =
@@ -1970,29 +2057,39 @@ void StudentMainWindow::buildDiaryPage()
     diaryRecordCombo->setObjectName(
         "studentDiaryRecordSelector");
 
+    QLabel *diaryTitleLabel =
+        new QLabel("日记标题");
+    diaryTitleLabel->setObjectName("studentDiaryFieldLabel");
+
+    diaryTitleEdit = new QLineEdit;
+    diaryTitleEdit->setObjectName("studentDiaryTitleEditor");
+    diaryTitleEdit->setMinimumHeight(42);
+    diaryTitleEdit->setPlaceholderText("为这篇志愿日记填写标题");
+
     diaryMessageEdit =
         new QTextEdit;
     diaryMessageEdit->setPlaceholderText(
         "记录这次志愿服务中的故事和感受……");
-    diaryMessageEdit->setMinimumHeight(180);
+    diaryMessageEdit->setMinimumHeight(110);
     diaryMessageEdit->setObjectName(
         "studentDiaryMessageEditor");
 
     QPushButton *publishButton =
-        new QPushButton("发布日记");
+        new QPushButton("提交展示申请");
     publishButton->setMinimumSize(120, 42);
     publishButton->setCursor(
         Qt::PointingHandCursor);
     publishButton->setObjectName(
         "studentDiaryPrimaryButton");
 
-    QLabel *messageLabel =
-        new QLabel("日记内容");
+    QLabel *messageLabel = new QLabel("日记内容");
     messageLabel->setObjectName("studentDiaryFieldLabel");
 
     publishLayout->addWidget(publishTitle);
     publishLayout->addWidget(recordTip);
     publishLayout->addWidget(diaryRecordCombo);
+    publishLayout->addWidget(diaryTitleLabel);
+    publishLayout->addWidget(diaryTitleEdit);
     publishLayout->addWidget(messageLabel);
     publishLayout->addWidget(diaryMessageEdit);
 
@@ -2007,7 +2104,59 @@ void StudentMainWindow::buildDiaryPage()
     cardRow->addStretch();
     cardRow->addWidget(publishFrame);
     cardRow->addStretch();
-    mainLayout->addLayout(cardRow);
+    applicationLayout->addLayout(cardRow);
+
+    QFrame *applicationsFrame = new QFrame;
+    applicationsFrame->setObjectName("studentDiaryApplicationsCard");
+    applicationsFrame->setMaximumWidth(820);
+    QVBoxLayout *applicationsLayout =
+        new QVBoxLayout(applicationsFrame);
+    applicationsLayout->setContentsMargins(20, 16, 20, 16);
+    applicationsLayout->setSpacing(10);
+
+    QLabel *applicationsTitle = new QLabel("我的展示申请");
+    applicationsTitle->setObjectName("studentDiaryCardTitle");
+    applicationsLayout->addWidget(applicationsTitle);
+
+    diaryApplicationsTable = new QTableWidget;
+    diaryApplicationsTable->setObjectName(
+        "studentDiaryApplicationsTable");
+    diaryApplicationsTable->setColumnCount(5);
+    diaryApplicationsTable->setHorizontalHeaderLabels(
+        {"日记编号", "志愿记录", "标题", "状态", "展示时间"});
+    diaryApplicationsTable->setEditTriggers(
+        QAbstractItemView::NoEditTriggers);
+    diaryApplicationsTable->setSelectionBehavior(
+        QAbstractItemView::SelectRows);
+    diaryApplicationsTable->setSelectionMode(
+        QAbstractItemView::SingleSelection);
+    diaryApplicationsTable->setAlternatingRowColors(true);
+    diaryApplicationsTable->setShowGrid(false);
+    diaryApplicationsTable->verticalHeader()->setVisible(false);
+    diaryApplicationsTable->verticalHeader()->setDefaultSectionSize(38);
+    diaryApplicationsTable->horizontalHeader()->setSectionResizeMode(
+        QHeaderView::ResizeToContents);
+    diaryApplicationsTable->horizontalHeader()->setSectionResizeMode(
+        2, QHeaderView::Stretch);
+    diaryApplicationsTable->setMinimumHeight(150);
+
+    diaryApplicationsEmptyLabel = new QLabel("你还没有提交日记展示申请。");
+    diaryApplicationsEmptyLabel->setObjectName(
+        "studentDiaryApplicationsEmptyState");
+    diaryApplicationsEmptyLabel->setAlignment(Qt::AlignCenter);
+
+    applicationsLayout->addWidget(diaryApplicationsTable);
+    applicationsLayout->addWidget(diaryApplicationsEmptyLabel);
+
+    QHBoxLayout *applicationsRow = new QHBoxLayout;
+    applicationsRow->addStretch();
+    applicationsRow->addWidget(applicationsFrame);
+    applicationsRow->addStretch();
+    applicationLayout->addLayout(applicationsRow);
+    applicationLayout->addStretch();
+
+    applicationScroll->setWidget(applicationContent);
+    mainLayout->addWidget(applicationScroll, 1);
 
     QPushButton *backToWallButton =
         new QPushButton("← 返回日记墙");
@@ -2038,6 +2187,7 @@ void StudentMainWindow::buildDiaryPage()
         });
 
     refreshDiaryPublishOptions();
+    refreshDiaryApplications();
 }
 
 void StudentMainWindow::buildDiaryWallPage()
@@ -2070,7 +2220,7 @@ void StudentMainWindow::buildDiaryWallPage()
     headingLayout->addWidget(subtitleLabel);
 
     QPushButton *publishButton =
-        new QPushButton("发布日记");
+        new QPushButton("提交展示申请");
     publishButton->setMinimumHeight(40);
     publishButton->setCursor(Qt::PointingHandCursor);
     publishButton->setObjectName(
@@ -2114,6 +2264,7 @@ void StudentMainWindow::buildDiaryWallPage()
         [this]()
         {
             refreshDiaryPublishOptions();
+            refreshDiaryApplications();
             contentStack->setCurrentWidget(diaryPage);
         });
 
@@ -3329,6 +3480,10 @@ void StudentMainWindow::refreshDiaryPublishOptions()
 
     diaryRecordCombo->clear();
 
+    const DiaryService diaryService(*dataManager);
+    const std::vector<DiaryApplicationView> applications =
+        diaryService.queryMyApplications(accountId);
+
     for (const VolunteerRecord &record :
          dataManager->getRecords())
     {
@@ -3338,8 +3493,16 @@ void StudentMainWindow::refreshDiaryPublishOptions()
             continue;
         }
 
-        if (dataManager->findDiaryByRecordId(
-                record.getRecordId()) != nullptr)
+        bool alreadyApplied = false;
+        for (const DiaryApplicationView &application : applications)
+        {
+            if (application.recordId == record.getRecordId())
+            {
+                alreadyApplied = true;
+                break;
+            }
+        }
+        if (alreadyApplied)
         {
             continue;
         }
@@ -3362,8 +3525,54 @@ void StudentMainWindow::refreshDiaryPublishOptions()
     if (diaryRecordCombo->count() == 0)
     {
         diaryRecordCombo->addItem(
-            "暂无可用于发布日记的志愿记录",
+            "暂无可用于申请展示的志愿记录",
             "");
+    }
+}
+
+void StudentMainWindow::refreshDiaryApplications()
+{
+    if (dataManager == nullptr ||
+        diaryApplicationsTable == nullptr ||
+        diaryApplicationsEmptyLabel == nullptr)
+    {
+        return;
+    }
+
+    const DiaryService diaryService(*dataManager);
+    const std::vector<DiaryApplicationView> applications =
+        diaryService.queryMyApplications(accountId);
+    diaryApplicationsTable->setRowCount(
+        static_cast<int>(applications.size()));
+    diaryApplicationsTable->setVisible(!applications.empty());
+    diaryApplicationsEmptyLabel->setVisible(applications.empty());
+
+    for (int row = 0; row < static_cast<int>(applications.size()); ++row)
+    {
+        const DiaryApplicationView &application =
+            applications[static_cast<size_t>(row)];
+        const QString title = application.title.empty()
+            ? QStringLiteral("历史日记（无标题）")
+            : QString::fromStdString(application.title);
+        const QString publishedAt = application.publishedAt.has_value()
+            ? QString::fromStdString(*application.publishedAt)
+            : (application.displayStatus == DiaryDisplayStatus::Displayed ||
+                       application.displayStatus == DiaryDisplayStatus::TakenDown
+                   ? QStringLiteral("历史发布时间未保存")
+                   : QStringLiteral("尚未展示"));
+        const QStringList values = {
+            QString::fromStdString(application.diaryId),
+            QString::fromStdString(application.recordId),
+            title,
+            diaryDisplayStatusText(application.displayStatus),
+            publishedAt};
+        for (int column = 0; column < values.size(); ++column)
+        {
+            diaryApplicationsTable->setItem(
+                row,
+                column,
+                new QTableWidgetItem(values[column]));
+        }
     }
 }
 
@@ -3471,6 +3680,16 @@ void StudentMainWindow::refreshDiaryWall()
         cardLayout->addLayout(
             authorLayout);
 
+        if (!diary.title.empty())
+        {
+            QLabel *titleLabel = new QLabel(
+                QString::fromStdString(diary.title));
+            titleLabel->setObjectName("studentDiaryPostTitle");
+            titleLabel->setTextFormat(Qt::PlainText);
+            titleLabel->setWordWrap(true);
+            cardLayout->addWidget(titleLabel);
+        }
+
         QLabel *recordLabel =
             new QLabel(
                 QString::fromStdString(diary.categoryName) +
@@ -3478,7 +3697,8 @@ void StudentMainWindow::refreshDiaryWall()
                 QString::fromStdString(diary.serviceDate) +
                 " · " +
                 QString::number(diary.durationHours, 'f', 1) +
-                " 小时");
+                " 小时 · 积分 " +
+                QString::number(diary.score, 'f', 1));
         recordLabel->setObjectName(
             "studentDiaryFact");
         cardLayout->addWidget(recordLabel);
@@ -3491,12 +3711,22 @@ void StudentMainWindow::refreshDiaryWall()
             "studentDiaryFact");
         cardLayout->addWidget(placeLabel);
 
+        if (diary.publishedAt.has_value())
+        {
+            QLabel *publishedAtLabel = new QLabel(
+                "展示时间：" +
+                QString::fromStdString(*diary.publishedAt));
+            publishedAtLabel->setObjectName("studentDiaryFact");
+            cardLayout->addWidget(publishedAtLabel);
+        }
+
         QLabel *messageLabel =
             new QLabel(
                 QString::fromStdString(
                     diary.content));
         messageLabel->setObjectName(
             "studentDiaryMessage");
+        messageLabel->setTextFormat(Qt::PlainText);
         messageLabel->setWordWrap(true);
         messageLabel->setTextInteractionFlags(
             Qt::TextSelectableByMouse);
@@ -3550,43 +3780,29 @@ void StudentMainWindow::refreshDiaryWall()
                     return;
                 }
 
-                DiaryPost *selectedDiary =
-                    dataManager->findDiary(
-                        diaryId);
-
-                if (selectedDiary == nullptr)
+                DiaryService diaryService(*dataManager);
+                const bool currentlyLiked = [&]()
                 {
-                    QMessageBox::warning(
-                        this,
-                        "错误",
-                        "没有找到该日记。");
-
+                    const std::vector<DiaryPostPublicView> currentFeed =
+                        diaryService.queryPublicFeed(accountId);
+                    for (const DiaryPostPublicView &post : currentFeed)
+                    {
+                        if (post.diaryId == diaryId)
+                        {
+                            return post.likedByCurrentStudent;
+                        }
+                    }
+                    return false;
+                }();
+                const DiaryServiceOutcome outcome = currentlyLiked
+                    ? diaryService.unlike(accountId, diaryId)
+                    : diaryService.like(accountId, diaryId);
+                if (!outcome.succeeded())
+                {
+                    showDiaryServiceFailure(this, outcome.status);
+                    refreshDiaryWall();
                     return;
                 }
-
-                if (selectedDiary->hasLiked(
-                        accountId))
-                {
-                    QMessageBox::information(
-                        this,
-                        "提示",
-                        "你已经点赞过这篇日记了。");
-
-                    return;
-                }
-
-                if (!selectedDiary->addLike(
-                        accountId))
-                {
-                    QMessageBox::information(
-                        this,
-                        "提示",
-                        "点赞失败或已经点赞。");
-
-                    return;
-                }
-
-                dataManager->saveDiaries();
                 refreshDiaryWall();
             });
 
@@ -3607,6 +3823,7 @@ void StudentMainWindow::publishDiary()
 {
     if (dataManager == nullptr ||
         diaryRecordCombo == nullptr ||
+        diaryTitleEdit == nullptr ||
         diaryMessageEdit == nullptr)
     {
         return;
@@ -3621,96 +3838,39 @@ void StudentMainWindow::publishDiary()
         QMessageBox::information(
             this,
             "提示",
-            "目前没有可以发布日记的志愿记录。\n"
-            "只有审核通过且尚未发布日记的记录可以使用。");
+            "目前没有可用于申请展示的本人已通过志愿记录。");
 
         return;
     }
 
-    QString message =
-        diaryMessageEdit->toPlainText().trimmed();
-
-    if (message.isEmpty())
-    {
-        QMessageBox::information(
-            this,
-            "提示",
-            "请输入日记内容。");
-
-        return;
-    }
-
-    if (containsInvalidPersistenceCharacter(message))
-    {
-        QMessageBox::information(
-            this,
-            "提示",
-            "日记内容中不能包含字符 | 或换行。");
-
-        return;
-    }
-
-    std::string recordId =
+    const std::string recordId =
         diaryRecordCombo->currentData()
             .toString()
             .toStdString();
-
-    VolunteerRecord *record =
-        dataManager->findRecord(recordId);
-
-    if (record == nullptr)
-    {
-        QMessageBox::warning(
-            this,
-            "错误",
-            "没有找到对应的志愿记录。");
-
-        return;
-    }
-
-    if (record->getStudentId() != accountId ||
-        record->getStatus() != RecordStatus::Approved)
-    {
-        QMessageBox::information(
-            this,
-            "提示",
-            "只有本人审核通过的志愿记录才能发布日记。");
-
-        return;
-    }
-
-    if (dataManager->findDiaryByRecordId(recordId) != nullptr)
-    {
-        QMessageBox::information(
-            this,
-            "提示",
-            "这条志愿记录已经发布过日记。");
-
-        refreshDiaryWall();
-        return;
-    }
-
-    std::string diaryId =
-        dataManager->generateDiaryId();
-
-    DiaryPost diary(
-        diaryId,
+    DiaryService diaryService(*dataManager);
+    const DiaryServiceOutcome outcome = diaryService.requestDisplay(
         accountId,
         recordId,
-        message.toStdString(),
-        0);
+        diaryTitleEdit->text().toStdString(),
+        diaryMessageEdit->toPlainText().toStdString());
+    if (!outcome.succeeded())
+    {
+        showDiaryServiceFailure(this, outcome.status);
+        refreshDiaryPublishOptions();
+        refreshDiaryApplications();
+        return;
+    }
 
-    dataManager->addDiary(diary);
-    dataManager->saveDiaries();
-
+    diaryTitleEdit->clear();
     diaryMessageEdit->clear();
 
     QMessageBox::information(
         this,
-        "发布成功",
-        "志愿日记发布成功。");
+        "申请已提交",
+        "日记展示申请已提交，等待管理员审核。审核通过后才会出现在日记墙。 ");
 
     refreshDiaryPublishOptions();
+    refreshDiaryApplications();
 }
 
 void StudentMainWindow::refreshProfilePage()

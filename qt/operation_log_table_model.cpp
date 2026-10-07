@@ -29,6 +29,12 @@ QString operationTypeText(OperationType type)
         return QStringLiteral("审核通过");
     case OperationType::VolunteerRecordRejected:
         return QStringLiteral("审核驳回");
+    case OperationType::DiaryDisplayApproved:
+        return QStringLiteral("日记展示审核通过");
+    case OperationType::DiaryDisplayRejected:
+        return QStringLiteral("日记展示审核未通过");
+    case OperationType::DiaryTakenDown:
+        return QStringLiteral("日记下架");
     }
     return QString();
 }
@@ -39,6 +45,8 @@ QString targetTypeText(OperationTargetType type)
     {
     case OperationTargetType::VolunteerRecord:
         return QStringLiteral("志愿记录");
+    case OperationTargetType::DiaryPost:
+        return QStringLiteral("志愿日记");
     }
     return QString();
 }

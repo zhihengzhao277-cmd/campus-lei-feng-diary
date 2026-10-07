@@ -193,6 +193,12 @@ string operationTypeToken(OperationType type)
         return "VolunteerRecordApproved";
     case OperationType::VolunteerRecordRejected:
         return "VolunteerRecordRejected";
+    case OperationType::DiaryDisplayApproved:
+        return "DiaryDisplayApproved";
+    case OperationType::DiaryDisplayRejected:
+        return "DiaryDisplayRejected";
+    case OperationType::DiaryTakenDown:
+        return "DiaryTakenDown";
     }
     return "";
 }
@@ -209,6 +215,21 @@ bool parseOperationTypeToken(const string &token, OperationType &type)
         type = OperationType::VolunteerRecordRejected;
         return true;
     }
+    if (token == "DiaryDisplayApproved")
+    {
+        type = OperationType::DiaryDisplayApproved;
+        return true;
+    }
+    if (token == "DiaryDisplayRejected")
+    {
+        type = OperationType::DiaryDisplayRejected;
+        return true;
+    }
+    if (token == "DiaryTakenDown")
+    {
+        type = OperationType::DiaryTakenDown;
+        return true;
+    }
     return false;
 }
 
@@ -218,6 +239,10 @@ string operationTargetTypeToken(OperationTargetType type)
     {
         return "VolunteerRecord";
     }
+    if (type == OperationTargetType::DiaryPost)
+    {
+        return "DiaryPost";
+    }
     return "";
 }
 
@@ -225,12 +250,17 @@ bool parseOperationTargetTypeToken(
     const string &token,
     OperationTargetType &type)
 {
-    if (token != "VolunteerRecord")
+    if (token == "VolunteerRecord")
     {
-        return false;
+        type = OperationTargetType::VolunteerRecord;
+        return true;
     }
-    type = OperationTargetType::VolunteerRecord;
-    return true;
+    if (token == "DiaryPost")
+    {
+        type = OperationTargetType::DiaryPost;
+        return true;
+    }
+    return false;
 }
 
 bool parseOperationLogSequence(

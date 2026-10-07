@@ -42,6 +42,25 @@ struct RecordLogPersistenceOutcome
     }
 };
 
+enum class DiaryPersistenceStatus
+{
+    Success,
+    PrepareFailure,
+    CommitFailure,
+    SeverePartialCommit
+};
+
+struct DiaryPersistenceOutcome
+{
+    DiaryPersistenceStatus status = DiaryPersistenceStatus::Success;
+    std::string message;
+
+    bool succeeded() const
+    {
+        return status == DiaryPersistenceStatus::Success;
+    }
+};
+
 class DataManager
 {
 private:
@@ -77,9 +96,10 @@ public:
     void saveStudents() const;
     void saveAdministrators() const;
     void saveRecords() const;
-    void saveDiaries() const;
+    DiaryPersistenceOutcome saveDiaries() const;
 
     RecordLogPersistenceOutcome saveRecordsAndOperationLogs() const;
+    DiaryPersistenceOutcome saveDiariesAndOperationLogs() const;
 
     Student *findStudent(
         const string &accountId);

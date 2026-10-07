@@ -120,145 +120,67 @@ data/operation_logs.csv
 
 ---
 
-# 6. 从源码构建
+# 6. 从源码生成本地 Qt 发布包
 
-## 6.1 已验证工具链
+## 6.1 构建机一次性准备
 
-最近验证的 Windows 构建环境：
+构建机需要 CMake、Ninja、Qt 6 Widgets，以及与该 Qt Kit 匹配的 MinGW g++。最近验证的工具链为 C++17、Qt 6.11.2、MinGW g++ 13.1.0、Ninja 1.12.1 和 CMake 4.4.3。请在运行脚本前一次性配置好这些工具，使 `cmake`、`ninja`、匹配的 `g++` 和该 Qt Kit 的 `windeployqt` 都能从 PowerShell 的 `PATH` 中找到。
 
-```text
-C++：C++17
-Qt：6.11.2
-MinGW g++：13.1.0
-Ninja：1.12.1
-CMake：4.4.3（项目最低要求 3.16）
-```
+这些是**构建要求**。脚本会检测并显示实际选中的工具路径，将它们显式传给 CMake；Qt 与 MinGW 必须来自匹配的 Qt Kit。
 
-CMake 是维护的正式构建方式。Qt 是正式产品目标，Console 仅为兼容性历史 / 调试目标。
+CMake 是项目唯一维护的正式构建系统；该脚本将工具探测、fresh configure/build、CTest 和发布部署串成一个命令。
 
-## 6.2 工具安装
+## 6.2 一条命令构建和部署
 
-安装 Qt 6.11.2（包含 Qt Widgets 和 MinGW 13.1.0）、CMake 3.16 或更高版本，以及 Ninja。Qt 和 MinGW 必须来自匹配的 Qt Kit。
-
-下面的目录只是示例；按本机安装位置设置变量：
+先克隆仓库并一次性配置好构建工具。之后的构建和运行路径是：
 
 ```powershell
-$QT = 'C:\Qt\6.11.2\mingw_64'
-$MINGW = 'C:\Qt\Tools\mingw1310_64'
-$NINJA = 'C:\Tools\Ninja\ninja.exe'
+git clone https://github.com/zhihengzhao277-cmd/campus-lei-feng-diary.git
+Set-Location campus-lei-feng-diary
+.\scripts\build_release.ps1
 ```
 
-## 6.3 全新 Release 配置、构建与测试
+构建完成后，双击 `release/校园雷锋日记.exe`。
 
-在 PowerShell 中从项目根目录运行。每次干净配置都使用一个新的空构建目录：
+脚本会全新配置 Release 构建，构建 `leifeng_qt`、`leifeng_console` 和 `core_behavior_tests`，运行 CTest，再用 `windeployqt` 部署 Qt 插件及 MinGW 运行库，并复制五个演示数据文件。只有 staging 包通过文件和数据校验后，脚本才会替换仓库根目录的 `release/`。
 
-```powershell
-$PROJECT_ROOT = (Resolve-Path .).Path
-$BUILD_DIR = Join-Path $PROJECT_ROOT 'build\release-ninja'
-$QT = 'C:\Qt\6.11.2\mingw_64'
-$MINGW = 'C:\Qt\Tools\mingw1310_64'
-$NINJA = 'C:\Tools\Ninja\ninja.exe'
-
-cmake -S $PROJECT_ROOT -B $BUILD_DIR -G Ninja `
-  -DCMAKE_MAKE_PROGRAM="$NINJA" `
-  -DCMAKE_CXX_COMPILER="$MINGW\bin\g++.exe" `
-  -DCMAKE_PREFIX_PATH="$QT" `
-  -DCMAKE_BUILD_TYPE=Release
-
-cmake --build $BUILD_DIR --target leifeng_qt leifeng_console core_behavior_tests --parallel 8
-ctest --test-dir $BUILD_DIR --output-on-failure
-```
-
-如果该构建目录已经存在，请为下一次 fresh configure 选择新的目录名。CMake 配置时会把缺失的初始数据文件复制到构建目录，不覆盖已经存在的运行数据。
+`release/` 被 Git 忽略，因此新克隆的仓库不会自带可执行文件；运行脚本成功后才会生成本机的发布包。
 
 ### Windows 非 ASCII 路径
 
-如果项目路径包含中文或其他非 ASCII 字符，且 Qt AutoMoc 报 `Invalid argument` 路径错误，优先从纯 ASCII 路径构建。也可在本机使用同一目录的 Windows 8.3 短路径；`LEIFEN~2` 只是本机示例，不是可移植路径。
-
-## 6.4 运行源码构建版本
-
-Qt 使用 exe 同级的构建运行数据目录；可以从任意当前工作目录启动：
-
-```powershell
-$oldPath = $env:PATH
-try {
-    $env:PATH = "$QT\bin;$MINGW\bin;" + $oldPath
-    & "$BUILD_DIR\leifeng_qt.exe"
-}
-finally {
-    $env:PATH = $oldPath
-}
-```
-
-Console 是兼容入口，使用相对 `data/` 路径，运行时应从项目根目录启动：
-
-```powershell
-Set-Location $PROJECT_ROOT
-& "$BUILD_DIR\leifeng_console.exe"
-```
-
-不再维护单独的手工 `g++` 源文件清单；CMake 是 Qt 与 Console 的正式构建入口。
+脚本优先使用普通 ASCII 安全项目路径。项目路径含中文等非 ASCII 字符时，会尝试为同一目录解析 Windows 8.3 短路径，并在该 ASCII 路径下完成配置和构建。如果系统没有可用的短路径，脚本会停止并提示将仓库移动或克隆到纯 ASCII 路径。
 
 ---
 
-# 7. 重新生成独立 Qt 发布包
+# 7. 运行发布包
 
-发布目录 `/release/` 被 Git 忽略，不进入 Git 历史。用新的临时目录先构建和验证包，再将通过验证的目录放置为仓库根目录下的 `release/`。
+发布后保留整个 `release/` 目录，并双击：
 
-在 PowerShell 中设置当前工具链路径，并从 Release 构建复制 Qt 程序：
-
-```powershell
-$PROJECT_ROOT = (Resolve-Path .).Path
-$BUILD_DIR = Join-Path $PROJECT_ROOT 'build\release-ninja'
-$PACKAGE_DIR = Join-Path $PROJECT_ROOT 'build\release-package'
-$QT = 'C:\Qt\6.11.2\mingw_64'
-$MINGW = 'C:\Qt\Tools\mingw1310_64'
-$PACKAGE_EXE = Join-Path $PACKAGE_DIR '校园雷锋日记.exe'
-
-New-Item -ItemType Directory -Path $PACKAGE_DIR
-Copy-Item (Join-Path $BUILD_DIR 'leifeng_qt.exe') $PACKAGE_EXE
-$oldPath = $env:PATH
-try {
-    $env:PATH = "$QT\bin;$MINGW\bin;" + $oldPath
-    & "$QT\bin\windeployqt.exe" --release --compiler-runtime --dir $PACKAGE_DIR $PACKAGE_EXE
-}
-finally {
-    $env:PATH = $oldPath
-}
-
-New-Item -ItemType Directory -Path (Join-Path $PACKAGE_DIR 'data')
-$requiredData = @('students.txt', 'administrators.txt', 'records.txt', 'diaries.txt', 'operation_logs.csv')
-foreach ($name in $requiredData) {
-    Copy-Item (Join-Path $PROJECT_ROOT "data\$name") (Join-Path $PACKAGE_DIR "data\$name")
-}
+```text
+release/校园雷锋日记.exe
 ```
 
-`windeployqt` 会依据 Release 程序部署 Qt 运行库和插件，并通过 `--compiler-runtime` 部署 MinGW 运行库。至少确认 `platforms/qwindows.dll` 存在。不要只分发 exe；整个目录都属于运行包。
+这是**运行要求**：部署好的发布包不需要目标电脑安装 Qt、MinGW、CMake 或 Ninja，也不需要设置 `PATH`、使用 CMD 或 PowerShell。不要只复制 exe；Qt / MinGW 运行库、`platforms/` 插件和 `data/` 都必须与 exe 一起保留。
 
-验证包通过后再用它替换旧 `release/`。最终目录应包含 `校园雷锋日记.exe`、部署所需 DLL / 插件，以及上述五个 `data/` 文件。
+发布包从 exe 同级的 `data/` 读取自己的演示数据，包含：
+
+```text
+students.txt
+administrators.txt
+records.txt
+diaries.txt
+operation_logs.csv
+```
+
+重新运行构建脚本会用仓库中的演示数据生成新的 `release/data/` 副本；不会修改仓库源 `data/`。如需验证写入和重启后的持久化，请在 `release/` 的临时副本中操作，不要把测试数据写入仓库源数据或正式发布目录。
 
 ---
 
-# 8. 发布包独立启动与冒烟验证
+# 8. 本地发布检查
 
-先确认包目录中的五个数据文件齐全。为排除 Qt / MinGW 开发环境依赖，在 PowerShell 中临时将 PATH 限定为 Windows 系统目录，再启动发布程序。关闭程序后，`finally` 会恢复原 PATH：
+发布脚本会在构建和 CTest 成功后验证主程序、Qt Widgets 运行库、`platforms/qwindows.dll`、MinGW 运行库以及五个数据文件，并比较发布数据与仓库演示数据的 SHA-256。可将整个 `release/` 目录复制到独立位置后双击 exe，确认包不依赖开发机上的 Qt / MinGW 环境。
 
-```powershell
-$oldPath = $env:PATH
-try {
-    $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
-    & .\release\校园雷锋日记.exe
-}
-finally {
-    $env:PATH = $oldPath
-}
-```
-
-到达登录界面表示启动阶段已成功加载 exe 同级的五个数据文件。持久化回归必须在 `release/` 的临时副本中进行，不得用仓库源 `data/`。
-
-**本地验证记录（2026-10-07）：** fresh Release 构建的 Qt、Console 和 Core 测试目标均构建成功，CTest 通过；发布目录在仅含 Windows 系统目录的 PATH 下启动并到达登录界面。隔离副本中的学生登录、学生主页、退出登录、管理员登录、创建学生，以及创建的测试学生在关闭并重启后再次登录均通过。仓库源 `data/` 未改变。此记录覆盖启动、登录路由和基本持久化，不代表对所有页面完成了逐页人工视觉审查。
-
-完整目录复制到独立目录后也应重复启动验证。后续发布仍应按本节步骤复核实际使用的发布包。
+**本机验证记录（2026-10-07）：** fresh Release configure、三个构建目标、CTest（1/1）、`windeployqt` 部署和发布文件校验均通过。将最终发布包复制到隔离目录，在仅含 Windows 系统目录的 `PATH` 且移除 Qt 环境变量后，程序保持运行并到达登录窗口。最终人工功能 smoke 在 `build/iu-rel-02-release/smoke-copy-final` 通过：学生登录、主页、查询和退出；管理员登录及 Review、Statistics、OperationLog、Diary Management 页面可达；隔离测试学生创建后关闭并重启，仍可登录。持久化写入仅发生在该隔离副本，仓库 `data/` 和正式 `release/data/` 未修改。这是功能发布 smoke，不是新一轮 UI 视觉重设计审计。
 
 ---
 

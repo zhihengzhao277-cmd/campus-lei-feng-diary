@@ -27,7 +27,8 @@ int main(int argc, char *argv[])
             QString(
                 "无法加载运行数据目录：\n%1\n\n"
                 "请确认目录中包含并可读取 students.txt、"
-                "administrators.txt、records.txt 和 diaries.txt。")
+                "administrators.txt、records.txt、diaries.txt 和 "
+                "operation_logs.csv。")
                 .arg(QDir::toNativeSeparators(dataDirectory)));
         return EXIT_FAILURE;
     }
